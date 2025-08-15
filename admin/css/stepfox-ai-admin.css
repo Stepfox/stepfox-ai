@@ -1,0 +1,98 @@
+/* StepFox AI Admin Styles */
+
+.stepfox-ai-admin-content {
+    max-width: 800px;
+    margin-top: 20px;
+}
+
+.stepfox-ai-admin-content h2 {
+    font-size: 24px;
+    margin-bottom: 15px;
+    color: #23282d;
+}
+
+.stepfox-ai-admin-content h3 {
+    font-size: 18px;
+    margin-top: 25px;
+    margin-bottom: 10px;
+    color: #23282d;
+}
+
+.stepfox-ai-admin-content p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #555;
+}
+
+.stepfox-ai-admin-content ol {
+    margin-left: 20px;
+    margin-bottom: 20px;
+}
+
+.stepfox-ai-admin-content ol li {
+    margin-bottom: 8px;
+    line-height: 1.6;
+}
+
+/* Settings page styles */
+.form-table th {
+    width: 200px;
+}
+
+.form-table input[type="password"],
+.form-table select {
+    width: 350px;
+    max-width: 100%;
+}
+
+.form-table .description {
+    font-style: italic;
+    color: #666;
+    margin-top: 5px;
+}
+
+/* API key field */
+#stepfox_ai_openai_api_key {
+    font-family: monospace;
+}
+
+/* Success/Error messages */
+.stepfox-ai-notice {
+    margin: 15px 0;
+    padding: 12px;
+    border-left: 4px solid;
+    background: #fff;
+}
+
+.stepfox-ai-notice.success {
+    border-left-color: #46b450;
+    background-color: #ecf7ed;
+}
+
+.stepfox-ai-notice.error {
+    border-left-color: #dc3232;
+    background-color: #fbeaea;
+}
+
+/* Button styles */
+.stepfox-ai-admin-content .button {
+    margin-top: 10px;
+}
+
+/* Responsive styles */
+@media screen and (max-width: 782px) {
+    .form-table th {
+        width: auto;
+        display: block;
+        padding-bottom: 5px;
+    }
+    
+    .form-table td {
+        padding-left: 0;
+    }
+    
+    .form-table input[type="password"],
+    .form-table select {
+        width: 100%;
+    }
+}

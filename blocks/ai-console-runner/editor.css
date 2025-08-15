@@ -1,0 +1,91 @@
+/* StepFox AI Console Runner Block - Editor Styles */
+
+.wp-block-stepfox-ai-console-runner .prompt-field {
+    margin-bottom: 1em;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+}
+
+.wp-block-stepfox-ai-console-runner .button-group {
+    display: flex;
+    gap: 0.5em;
+    align-items: center;
+    margin-bottom: 1em;
+}
+
+.wp-block-stepfox-ai-console-runner .live-preview-wrapper {
+    margin-bottom: 1em;
+    padding: 15px;
+    border: 2px dashed #ddd;
+    border-radius: 8px;
+    background-color: #fafafa;
+}
+
+.wp-block-stepfox-ai-console-runner .live-preview-wrapper p {
+    margin-top: 0;
+    margin-bottom: 0.5em;
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+}
+
+.wp-block-stepfox-ai-console-runner .live-preview-iframe {
+    width: 100%;
+    min-height: 200px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: #fff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.wp-block-stepfox-ai-console-runner .code-field {
+    font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 15px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    min-height: 150px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.wp-block-stepfox-ai-console-runner .code-field::placeholder {
+    color: #6c757d;
+    opacity: 0.6;
+}
+
+/* Notice styles */
+.wp-block-stepfox-ai-console-runner .components-notice {
+    margin-bottom: 1em;
+}
+
+/* Button hover effects */
+.wp-block-stepfox-ai-console-runner .components-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Loading state */
+.wp-block-stepfox-ai-console-runner .components-button.is-busy {
+    cursor: wait;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+    .wp-block-stepfox-ai-console-runner .button-group {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .wp-block-stepfox-ai-console-runner .button-group .components-button {
+        width: 100%;
+        justify-content: center;
+    }
+}

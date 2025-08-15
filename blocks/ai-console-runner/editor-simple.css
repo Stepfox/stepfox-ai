@@ -1,0 +1,82 @@
+/* StepFox AI Console Runner - Simple Editor Styles */
+
+.stepfox-ai-console-runner {
+    padding: 20px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+}
+
+.stepfox-ai-console-runner .notice {
+    padding: 10px;
+    margin: 10px 0;
+    border-radius: 4px;
+}
+
+.stepfox-ai-console-runner .notice-error {
+    background-color: #fee;
+    border-left: 4px solid #dc3232;
+    color: #dc3232;
+}
+
+.stepfox-ai-console-runner h4 {
+    margin-top: 15px;
+    margin-bottom: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+}
+
+.stepfox-ai-console-runner iframe {
+    resize: vertical;
+    display: block;
+}
+
+.stepfox-ai-console-runner pre {
+    margin: 0;
+    padding: 15px;
+    background-color: #1e1e1e;
+    border-radius: 4px;
+    overflow-x: auto;
+}
+
+.stepfox-ai-console-runner pre code {
+    color: #d4d4d4;
+    font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+/* Button spacing */
+.stepfox-ai-console-runner .components-button {
+    margin-right: 8px;
+}
+
+/* Preview area styles */
+.stepfox-ai-console-runner .stepfox-ai-preview {
+    margin-bottom: 20px;
+}
+
+.stepfox-ai-console-runner .stepfox-ai-preview-content {
+    min-height: 100px;
+    padding: 20px;
+    border: 2px solid #0073aa;
+    border-radius: 4px;
+    background-color: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Make preview content interactive */
+.stepfox-ai-console-runner .stepfox-ai-preview-content * {
+    max-width: 100%;
+}
+
+.stepfox-ai-console-runner .stepfox-ai-preview-content img {
+    height: auto;
+}
+
+.stepfox-ai-console-runner .stepfox-ai-preview-content button,
+.stepfox-ai-console-runner .stepfox-ai-preview-content input[type="button"],
+.stepfox-ai-console-runner .stepfox-ai-preview-content input[type="submit"] {
+    cursor: pointer;
+}
