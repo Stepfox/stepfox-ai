@@ -105,6 +105,7 @@ function stepfox_ai_register_blocks_direct() {
         'nonce' => wp_create_nonce('wp_rest'),
         'ajaxUrl' => admin_url('admin-ajax.php'),
         'fallbackNonce' => wp_create_nonce('stepfox_ai_fallback_nonce'),
+        'model' => get_option('stepfox_ai_openai_model', 'gpt-3.5-turbo'),
     ));
 }
 add_action('init', 'stepfox_ai_register_blocks_direct', 5);

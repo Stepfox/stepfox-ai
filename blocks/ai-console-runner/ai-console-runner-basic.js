@@ -108,8 +108,16 @@
                             setStatusMessage('✅ Code generated successfully!');
                         }
                     } else {
-                        setStatusMessage('Error: ' + (data.message || 'Failed to generate code'));
-                        setAttributes({ codeContent: '// Error: ' + (data.message || 'Failed to generate code') });
+                        var errorMsg = data.message || 'Failed to generate code';
+                        try {
+                            console.groupCollapsed('[StepFox AI] Generation Failed');
+                            console.error('Server payload:', data);
+                            console.log('Prompt length:', (attributes.promptContent || '').length);
+                            console.log('Images count:', (attributes.promptImages || []).length);
+                            console.groupEnd();
+                        } catch (_e) {}
+                        setStatusMessage('Error: ' + errorMsg);
+                        setAttributes({ codeContent: '// Error: ' + errorMsg });
                     }
                     setIsGenerating(false);
                 }
@@ -119,10 +127,14 @@
                         setStatusMessage('Please enter a prompt first!');
                         return;
                     }
+
+                    // Preserve raw pasted block markup; avoid React sanitization by keeping it in attributes only
+                    // and not rendering it anywhere except as plain text code preview.
+                    var rawPrompt = attributes.promptContent;
                     
                     setIsGenerating(true);
-                    setStatusMessage('Generating code...');
-                    setAttributes({ codeContent: '// Generating...' });
+                    setStatusMessage('Generating code... This may take up to 5 minutes for complex requests.');
+                    setAttributes({ codeContent: '// Generating... Please wait, this may take a few minutes for complex requests.' });
                     
                     // Check if API settings exist
                     if (!window.stepfoxAI || !window.stepfoxAI.apiUrl) {
@@ -131,6 +143,24 @@
                         return;
                     }
                     
+                    // Create AbortController for timeout
+                    // Log outbound request basics
+                    try {
+                        console.groupCollapsed('[StepFox AI] Request');
+                        console.log('API URL:', window.stepfoxAI.apiUrl);
+                        console.log('Prompt length:', (rawPrompt || '').length);
+                        console.log('Images count:', (attributes.promptImages || []).length);
+                        // Ask backend which model will be used (it logs on server). Also print current selection if exposed.
+                        if (window.stepfoxAI && window.stepfoxAI.model) {
+                            console.log('Selected model (client):', window.stepfoxAI.model);
+                        }
+                        console.groupEnd();
+                    } catch (_e) {}
+                    var controller = new AbortController();
+                    var timeoutId = setTimeout(function() {
+                        controller.abort();
+                    }, 300000); // 5 minutes timeout
+                    
                     fetch(window.stepfoxAI.apiUrl, {
                         method: 'POST',
                         headers: {
@@ -138,14 +168,22 @@
                             'X-WP-Nonce': window.stepfoxAI.nonce
                         },
                         body: JSON.stringify({
-                            prompt: attributes.promptContent,
+                            prompt: rawPrompt,
                             images: attributes.promptImages
-                        })
+                        }),
+                        signal: controller.signal
                     })
                     .then(function(response) {
+                        clearTimeout(timeoutId); // Clear the timeout on successful response
                         // Always try to parse the response to get error details
                         return response.json().then(function(data) {
                             if (!response.ok) {
+                                // Log full error payload from server
+                                try {
+                                    console.groupCollapsed('[StepFox AI] HTTP ' + response.status + ' Error');
+                                    console.error('Response JSON:', data);
+                                    console.groupEnd();
+                                } catch (_e) {}
                                 // If response is not ok, throw error with server message
                                 throw new Error(data.message || data.error || 'Network response was not ok (Status: ' + response.status + ')');
                             }
@@ -153,10 +191,53 @@
                         });
                     })
                     .then(function(data) {
+                        try {
+                            if (data && data.model_used) {
+                                console.log('[StepFox AI] Model used:', data.model_used, '| API:', data.api || 'unknown');
+                            }
+                            if (data && data.prompt_length) {
+                                console.log('[StepFox AI] Prompt length (system+user):', data.prompt_length);
+                                if (data.prompt_preview) {
+                                    console.groupCollapsed('[StepFox AI] Prompt preview');
+                                    console.log(data.prompt_preview);
+                                    console.groupEnd();
+                                }
+                            }
+                        } catch (_e) {}
                         handleSuccessfulGeneration(data);
                     })
                     .catch(function(err) {
+                        clearTimeout(timeoutId); // Clear timeout on error too
                         console.error('REST API error:', err);
+                        console.error('Error details:', {
+                            message: err.message,
+                            name: err.name,
+                            stack: err.stack
+                        });
+                        
+                        // Check if it was a timeout error
+                        if (err.name === 'AbortError') {
+                            setStatusMessage('Request timed out after 5 minutes. Try a simpler prompt or break it into smaller parts.');
+                            setAttributes({ codeContent: '// Error: Request timed out. The prompt may be too complex. Try simplifying it.' });
+                            setIsGenerating(false);
+                            return;
+                        }
+                        
+                        // Check for specific error patterns
+                        var errorMessage = err.message.toLowerCase();
+                        if (errorMessage.includes('rate') && errorMessage.includes('limit')) {
+                            setStatusMessage('Rate limit reached. Please wait a moment and try again.');
+                            setAttributes({ codeContent: '// Error: Rate limit exceeded. Wait a few seconds and try again.' });
+                            setIsGenerating(false);
+                            return;
+                        }
+                        
+                        if (errorMessage.includes('quota') || errorMessage.includes('billing')) {
+                            setStatusMessage('API quota issue. Please check your OpenAI billing.');
+                            setAttributes({ codeContent: '// Error: OpenAI API quota or billing issue. Check your account.' });
+                            setIsGenerating(false);
+                            return;
+                        }
                         
                         // Try fallback AJAX method if REST API fails
                         if (window.stepfoxAI && window.stepfoxAI.ajaxUrl) {
@@ -169,12 +250,20 @@
                             formData.append('prompt', attributes.promptContent);
                             formData.append('images', JSON.stringify(attributes.promptImages));
                             
+                            // Create new AbortController for fallback
+                            var fallbackController = new AbortController();
+                            var fallbackTimeoutId = setTimeout(function() {
+                                fallbackController.abort();
+                            }, 300000); // 5 minutes timeout for fallback too
+                            
                             fetch(window.stepfoxAI.ajaxUrl, {
                                 method: 'POST',
                                 credentials: 'same-origin',
-                                body: formData
+                                body: formData,
+                                signal: fallbackController.signal
                             })
                             .then(function(response) {
+                                clearTimeout(fallbackTimeoutId); // Clear fallback timeout
                                 return response.json();
                             })
                             .then(function(data) {
@@ -185,9 +274,16 @@
                                 }
                             })
                             .catch(function(fallbackErr) {
+                                clearTimeout(fallbackTimeoutId); // Clear timeout on error
                                 console.error('Fallback error:', fallbackErr);
-                                setStatusMessage('Error: ' + err.message);
-                                setAttributes({ codeContent: '// Error: ' + err.message + '\n// Fallback error: ' + fallbackErr.message });
+                                
+                                if (fallbackErr.name === 'AbortError') {
+                                    setStatusMessage('Request timed out after 5 minutes. Try a simpler prompt.');
+                                    setAttributes({ codeContent: '// Error: Request timed out (5 minutes). The prompt may be too complex.' });
+                                } else {
+                                    setStatusMessage('Error: ' + err.message);
+                                    setAttributes({ codeContent: '// Error: ' + err.message + '\n// Fallback error: ' + fallbackErr.message });
+                                }
                                 setIsGenerating(false);
                             });
                         } else {
@@ -236,19 +332,23 @@
                                 fontWeight: 'bold' 
                             } 
                         }, 'Enter your prompt:'),
-                        el(RichText, {
-                            tagName: 'div',
-                            placeholder: 'e.g., "create a hero section with the uploaded images" or "make a gallery using the provided images"',
+                        // Use a plain textarea to preserve exact pasted markup (e.g., <!-- wp:... -->)
+                        el('textarea', {
                             value: attributes.promptContent,
-                            onChange: function(value) {
-                                setAttributes({ promptContent: value });
+                            onChange: function(e) {
+                                setAttributes({ promptContent: e.target.value });
                             },
+                            placeholder: 'Paste instructions or raw WordPress block markup (<!-- wp:... -->) here',
                             style: {
-                                minHeight: '60px',
+                                width: '100%',
+                                minHeight: '120px',
                                 padding: '10px',
                                 border: '1px solid #ddd',
                                 borderRadius: '4px',
-                                backgroundColor: 'white'
+                                backgroundColor: 'white',
+                                fontFamily: 'monospace',
+                                fontSize: '12px',
+                                whiteSpace: 'pre-wrap'
                             }
                         }),
                         
@@ -348,7 +448,7 @@
                                 }
                             }, 
                                 el('strong', {}, '⚠️ Note: '),
-                                'To analyze image content (read text, describe what\'s in the image), you need to select "GPT-4 Vision", "GPT-4o", or "GPT-4o Mini" in the StepFox AI settings. Other models can only use images for placement in blocks.'
+                                'To analyze image content (read text, describe what\'s in the image), you need to select a vision model (GPT-4 Vision, GPT-4o, or GPT-4o Mini) in the StepFox AI settings. Other models can only use images for placement in blocks.'
                             ),
                             
                             // Check for local images and show additional warning

@@ -20,7 +20,7 @@ StepFox AI adds an AI-powered console runner block to your WordPress editor. Usi
 * **Live Preview**: See your generated code rendered in real-time within the editor
 * **Console Execution**: Run JavaScript code directly in the browser console
 * **Secure API Integration**: API keys are stored securely on the server
-* **Multiple Model Support**: Choose between GPT-3.5 Turbo, GPT-4, and GPT-4 Turbo
+* **Multiple Model Support**: Choose between GPT-3.5 Turbo, GPT-4, GPT-4 Turbo, GPT-4o, GPT-4o Mini, and GPT-5 models (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-chat-latest).
 * **Block Editor Integration**: Seamlessly integrated with the WordPress block editor
 
 = Use Cases =
@@ -57,9 +57,28 @@ The plugin itself is free, but you'll need an OpenAI API key which requires a pa
 
 Yes, your API key is stored securely in the WordPress database and is never exposed to the frontend. All API calls are made server-side.
 
+= Why do I sometimes get "Failed to generate code" errors? =
+
+Intermittent failures can happen due to:
+* Rate limiting - wait 20-60 seconds between requests
+* Complex prompts - try simpler, more focused prompts
+* API quota exceeded - check your OpenAI billing
+* Network timeouts - retry after a moment
+
+Check the browser console (F12) for specific error messages.
+
+= Which model should I choose? =
+
+* GPT-5 — Complex reasoning, multi-step agentic tasks
+* GPT-5 Mini — Cost-optimized reasoning, balanced speed and cost
+* GPT-5 Nano — High-throughput, simple tasks
+* GPT-4o — Great overall with vision capabilities
+* GPT-4o Mini — Faster and cost-effective with vision
+* GPT-3.5 Turbo — Fastest and most economical
+
 = Can I use this with any OpenAI model? =
 
-Currently, the plugin supports GPT-3.5 Turbo, GPT-4, and GPT-4 Turbo. You can select your preferred model in the settings.
+The plugin supports GPT-3.5 Turbo, GPT-4 series (including GPT-4o and GPT-4o Mini), and GPT-5 series (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-chat-latest). You can select your preferred model in the settings.
 
 = What kind of code can I generate? =
 

@@ -195,6 +195,25 @@ class StepFox_AI_Admin {
             'stepfox-ai-settings',
             'stepfox_ai_openai_section'
         );
+
+        // System prompt
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_system_prompt',
+            array(
+                'type' => 'string',
+                'sanitize_callback' => function($val){ return wp_kses_post($val); },
+                'default' => '',
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_system_prompt',
+            __('System Prompt (optional)', 'stepfox-ai'),
+            array($this, 'system_prompt_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
     }
 
     /**
@@ -240,10 +259,30 @@ class StepFox_AI_Admin {
             <option value="gpt-4-vision-preview" <?php selected($model, 'gpt-4-vision-preview'); ?>>GPT-4 Vision (Can analyze images)</option>
             <option value="gpt-4o" <?php selected($model, 'gpt-4o'); ?>>GPT-4o (Latest, can analyze images)</option>
             <option value="gpt-4o-mini" <?php selected($model, 'gpt-4o-mini'); ?>>GPT-4o Mini (Faster, can analyze images)</option>
+            <optgroup label="GPT-5 Models">
+                <option value="gpt-5" <?php selected($model, 'gpt-5'); ?>>GPT-5 (Complex reasoning, multi-step tasks)</option>
+                <option value="gpt-5-mini" <?php selected($model, 'gpt-5-mini'); ?>>GPT-5 Mini (Cost-optimized reasoning)</option>
+                <option value="gpt-5-nano" <?php selected($model, 'gpt-5-nano'); ?>>GPT-5 Nano (High-throughput, simple tasks)</option>
+                <option value="gpt-5-chat-latest" <?php selected($model, 'gpt-5-chat-latest'); ?>>GPT-5 Chat Latest</option>
+            </optgroup>
         </select>
         <p class="description">
             <?php _e('Select the OpenAI model to use for code generation.', 'stepfox-ai'); ?><br>
-            <strong><?php _e('Note:', 'stepfox-ai'); ?></strong> <?php _e('Only GPT-4 Vision, GPT-4o, and GPT-4o Mini can analyze image content (read text, describe what\'s in images). Other models can only use images for placement in WordPress blocks.', 'stepfox-ai'); ?>
+            <strong><?php _e('Note:', 'stepfox-ai'); ?></strong> <?php _e('Only GPT-4 Vision, GPT-4o, and GPT-4o Mini can analyze image content (read text, describe what\'s in images). Other models can only use images for placement in WordPress blocks.', 'stepfox-ai'); ?><br>
+            <strong><?php _e('GPT-5 Models:', 'stepfox-ai'); ?></strong> <?php _e('Available mappings: gpt-5-thinking → gpt-5, gpt-5-thinking-mini → gpt-5-mini, gpt-5-thinking-nano → gpt-5-nano, gpt-5-main → gpt-5-chat-latest.', 'stepfox-ai'); ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * System prompt field callback
+     */
+    public function system_prompt_field_callback() {
+        $system_prompt = get_option('stepfox_ai_system_prompt', '');
+        ?>
+        <textarea id="stepfox_ai_system_prompt" name="stepfox_ai_system_prompt" rows="8" class="large-text code"><?php echo esc_textarea($system_prompt); ?></textarea>
+        <p class="description">
+            <?php _e('Optional. Prepended to every request as the system prompt. Leave blank to use only the user prompt. You can include guidelines for WordPress blocks, responsiveStyles, etc.', 'stepfox-ai'); ?>
         </p>
         <?php
     }
@@ -295,23 +334,40 @@ class StepFox_AI_Admin {
             return;
         }
 
+        // Determine the correct max tokens parameter for the model
+        $max_tokens_param = 'max_tokens'; // default
+        $new_parameter_models = array('gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4-turbo-preview', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-chat-latest');
+        if (in_array($model, $new_parameter_models)) {
+            $max_tokens_param = 'max_completion_tokens';
+        }
+        
+        // Build test request body
+        $test_body = array(
+            'model' => $model,
+            'messages' => array(
+                array(
+                    'role' => 'user',
+                    'content' => 'Say "Hello from StepFox AI!"'
+                )
+            ),
+            $max_tokens_param => 20,
+        );
+        
+        // Only add temperature for models that support it
+        // Check if model contains 'o' variant (like gpt-4o, gpt-4o-mini, etc) or any GPT-5 model
+        $is_temperature_restricted = (strpos($model, 'gpt-4o') !== false || strpos($model, 'gpt-5o') !== false || strpos($model, 'gpt-5') !== false);
+        if (!$is_temperature_restricted) {
+            $test_body['temperature'] = 0.7;
+        }
+        
         // Test the API with a simple request
         $response = wp_remote_post('https://api.openai.com/v1/chat/completions', array(
             'headers' => array(
                 'Content-Type' => 'application/json',
                 'Authorization' => 'Bearer ' . $api_key,
             ),
-            'body' => json_encode(array(
-                'model' => $model,
-                'messages' => array(
-                    array(
-                        'role' => 'user',
-                        'content' => 'Say "Hello from StepFox AI!"'
-                    )
-                ),
-                'max_tokens' => 20,
-            )),
-            'timeout' => 10,
+            'body' => json_encode($test_body),
+            'timeout' => 60, // 1 minute timeout for test connection
         ));
 
         if (is_wp_error($response)) {

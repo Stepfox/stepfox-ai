@@ -38,6 +38,24 @@ class StepFox_AI {
     protected $version;
 
     /**
+     * The admin class instance.
+     *
+     * @since    1.0.0
+     * @access   protected
+     * @var      StepFox_AI_Admin    $admin    The admin-specific functionality of the plugin.
+     */
+    protected $admin;
+
+    /**
+     * The API handler instance.
+     *
+     * @since    1.0.0
+     * @access   protected
+     * @var      StepFox_AI_API    $api    The API handler for OpenAI requests.
+     */
+    protected $api;
+
+    /**
      * Define the core functionality of the plugin.
      *
      * @since    1.0.0
@@ -127,6 +145,7 @@ class StepFox_AI {
         wp_localize_script('stepfox-ai-console-runner', 'stepfoxAI', array(
             'apiUrl' => rest_url('stepfox-ai/v1/generate'),
             'nonce' => wp_create_nonce('wp_rest'),
+            'model' => get_option('stepfox_ai_openai_model', 'gpt-3.5-turbo'),
         ));
 
         // Register the block

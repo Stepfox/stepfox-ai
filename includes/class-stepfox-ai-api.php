@@ -35,6 +35,7 @@ class StepFox_AI_API {
      * @var      string    $openai_api_url    The OpenAI API endpoint.
      */
     private $openai_api_url = 'https://api.openai.com/v1/chat/completions';
+    private $openai_responses_url = 'https://api.openai.com/v1/responses';
 
     /**
      * Initialize the class and set its properties.
@@ -113,6 +114,10 @@ class StepFox_AI_API {
      * @return   WP_REST_Response|WP_Error
      */
     public function handle_generate_request($request) {
+        // Extend PHP execution time for long-running AI requests
+        @set_time_limit(300); // 5 minutes
+        @ini_set('max_execution_time', 300);
+        
         $prompt = $request->get_param('prompt');
         $images = $request->get_param('images');
         $api_key = get_option('stepfox_ai_openai_api_key', '');
@@ -132,12 +137,29 @@ class StepFox_AI_API {
         }
 
         // Prepare the system prompt based on model capabilities
-        $base_prompt = 'You are an expert JavaScript, HTML, and WordPress block editor programmer. Write only the raw code for the following request. ' .
-            'Do not include any explanation, markdown formatting (like ```js or ```html), or any text other than the code itself. ' .
-            'Your entire response should be executable in a browser or valid WordPress block markup.';
+        // Log the model selected so frontend can see it in console
+        error_log('StepFox AI - Selected model: ' . $model . ' (will use ' . ($uses_responses_api ? 'Responses API' : 'Chat Completions') . ')');
+        // System prompt from settings (optional). If empty, we default to a minimal guardrail.
+        $settings_system_prompt = trim((string) get_option('stepfox_ai_system_prompt', ''));
+        if ($settings_system_prompt === '') {
+            $base_prompt = 'You are a helpful assistant that returns only raw code (no prose). Output must be valid WordPress block markup.';
+        } else {
+            $base_prompt = $settings_system_prompt;
+        }
         
         // Define vision-capable models
-        $vision_models = array('gpt-4-vision-preview', 'gpt-4o', 'gpt-4o-mini');
+        $vision_models = array(
+            'gpt-4-vision-preview', 
+            'gpt-4o', 
+            'gpt-4o-mini'
+            // Note: GPT-5 models don't have vision capabilities yet
+        );
+        
+        // GPT-5 models are available via API aliases; log selection
+        $gpt5_models = array('gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-chat-latest');
+        if (in_array($model, $gpt5_models)) {
+            error_log('StepFox AI - Using GPT-5 model: ' . $model);
+        }
         
         // Add vision-specific instructions for vision-capable models
         if (in_array($model, $vision_models) && !empty($images)) {
@@ -149,91 +171,11 @@ class StepFox_AI_API {
                 'When asked to extract text or describe image content, create appropriate WordPress blocks with that content.';
         }
         
-        $system_prompt = sprintf(
-            $base_prompt . "\n\n" .
-            'For WordPress block requests, you MUST use the exact block format that WordPress expects: ' .
-            "\n" .
-            'CRITICAL RULES:' .
-            "\n" .
-            '1. Each block comment MUST be on its own line with NO trailing spaces' .
-            "\n" .
-            '2. Block names use only lowercase and hyphens (wp:heading, wp:paragraph, wp:group)' .
-            "\n" .
-            '3. HTML tags must match the block type exactly (h2 for heading level 2, p for paragraph)' .
-            "\n" .
-            '4. Attributes must be valid JSON: {"level":2} not {level:2}' .
-            "\n" .
-            '5. Include proper WordPress CSS classes on HTML elements' .
-            "\n\n" .
-            'EXACT FORMATS:' .
-            "\n" .
-            '- Heading: <!-- wp:heading {"level":2} -->\\n<h2 class="wp-block-heading">Text</h2>\\n<!-- /wp:heading -->' .
-            "\n" .
-            '- Paragraph: <!-- wp:paragraph -->\\n<p>Text</p>\\n<!-- /wp:paragraph -->' .
-            "\n" .
-            '- Button: <!-- wp:buttons -->\\n<div class="wp-block-buttons"><!-- wp:button -->\\n<div class="wp-block-button"><a class="wp-block-button__link wp-element-button">Text</a></div>\\n<!-- /wp:button --></div>\\n<!-- /wp:buttons -->' .
-            "\n" .
-            '- Group: <!-- wp:group -->\\n<div class="wp-block-group">\\n<!-- wp:paragraph -->\\n<p>Content</p>\\n<!-- /wp:paragraph -->\\n</div>\\n<!-- /wp:group -->' .
-            "\n" .
-            '- Cover: <!-- wp:cover {"dimRatio":50} -->\\n<div class="wp-block-cover"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><div class="wp-block-cover__inner-container">\\ncontent\\n</div></div>\\n<!-- /wp:cover -->' .
-            "\n" .
-            '- Image: <!-- wp:image {"id":123,"sizeSlug":"large","linkDestination":"none"} -->\\n<figure class="wp-block-image size-large"><img src="URL" alt="Alt text" class="wp-image-123"/></figure>\\n<!-- /wp:image -->' .
-            "\n" .
-            '- Gallery: <!-- wp:gallery {"linkTo":"none"} -->\\n<figure class="wp-block-gallery has-nested-images">\\n<!-- wp:image {"id":1} -->\\n<figure class="wp-block-image"><img src="URL1" alt="" class="wp-image-1"/></figure>\\n<!-- /wp:image -->\\n</figure>\\n<!-- /wp:gallery -->' .
-            "\n" .
-            '- Cover with background image: <!-- wp:cover {"url":"IMAGE_URL","id":123,"dimRatio":50} -->\\n<div class="wp-block-cover"><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><img class="wp-block-cover__image-background wp-image-123" alt="" src="IMAGE_URL" data-object-fit="cover"/><div class="wp-block-cover__inner-container">\\ncontent\\n</div></div>\\n<!-- /wp:cover -->' .
-            "\n\n" .
-            'STEPFOX LOOKS RESPONSIVE ATTRIBUTES:' .
-            "\n" .
-            'WordPress blocks can include these special attributes from StepFox Looks plugin:' .
-            "\n" .
-            '- customId: unique identifier (e.g., "abc123")' .
-            "\n" .
-            '- responsiveStyles: object containing device-specific styles' .
-            "\n" .
-            '  - Devices: desktop, tablet, mobile' .
-            "\n" .
-            '  - Properties per device:' .
-            "\n" .
-            '    - Layout: width, height, min_width, max_width, min_height, max_height, display, position, z_index, order' .
-            "\n" .
-            '    - Positioning: top, right, bottom, left' .
-            "\n" .
-            '    - Spacing: padding (object with top/right/bottom/left), margin (object with top/right/bottom/left)' .
-            "\n" .
-            '    - Typography: font_size, line_height, font_weight, font_style, text_transform, text_decoration, textAlign, letter_spacing' .
-            "\n" .
-            '    - Flexbox: flex_direction, justify, align_items, align_self, justify_self, flexWrap, flex_grow, flex_shrink, gap' .
-            "\n" .
-            '    - Grid: grid_template_columns, align_content' .
-            "\n" .
-            '    - Borders: borderWidth (object), borderStyle (object), borderColor (object), borderRadius (object)' .
-            "\n" .
-            '    - Effects: opacity, transform, transition, box_shadow, filter, backdrop_filter' .
-            "\n" .
-            '    - Background: background_color, background_image, background_position, background_size, background_repeat' .
-            "\n" .
-            '    - Other: overflow, visibility, cursor, user_select, pointer_events, object_fit, object_position' .
-            "\n" .
-            '- animation: animation class name' .
-            "\n" .
-            '- animation_delay: delay value' .
-            "\n" .
-            '- animation_duration: duration value' .
-            "\n" .
-            '- custom_css: custom CSS code' .
-            "\n" .
-            '- custom_js: custom JavaScript code' .
-            "\n\n" .
-            'Example with responsive attributes:' .
-            "\n" .
-            '<!-- wp:group {"customId":"hero123","responsiveStyles":{"padding":{"desktop":{"top":"80px","bottom":"80px"},"mobile":{"top":"40px","bottom":"40px"}},"background_color":{"desktop":"#f0f0f0"}}} -->' .
-            "\n\n" .
-            'When user asks for responsive design, include appropriate responsiveStyles attributes.' .
-            "\n\n" .
-            'Request: "%s"',
-            $prompt
-        );
+        // The effective system prompt is whatever is saved in settings; we append the user prompt below.
+        $system_prompt = $base_prompt;
+        $system_prompt_length = strlen($system_prompt);
+        $system_prompt_preview = substr($system_prompt, 0, 1200);
+        error_log('StepFox AI - System prompt length: ' . $system_prompt_length);
         
         // Add image context if images are provided
         if (!empty($images) && is_array($images)) {
@@ -263,6 +205,9 @@ class StepFox_AI_API {
             $system_prompt .= $image_context;
             $system_prompt .= "\n\nWhen generating WordPress blocks, use the provided images in appropriate blocks like wp:image, wp:cover (with useFeaturedImage or url attribute), wp:media-text, etc. Use the exact URLs provided.";
         }
+
+        // Determine if this model should use the Responses API (GPT-5 text family)
+        $uses_responses_api = in_array($model, array('gpt-5', 'gpt-5-mini', 'gpt-5-nano'));
 
         // Prepare the request body based on model type
         if (in_array($model, $vision_models) && !empty($images) && is_array($images)) {
@@ -309,6 +254,10 @@ class StepFox_AI_API {
                 }
             }
             
+            // Use the appropriate max tokens parameter based on model
+            $max_tokens_param = $this->get_max_tokens_parameter($model);
+            
+            // Build body array for Vision models (Chat Completions only)
             $body = array(
                 'model' => $model,
                 'messages' => array(
@@ -317,31 +266,58 @@ class StepFox_AI_API {
                         'content' => $user_content
                     )
                 ),
-                'max_tokens' => 4096, // Vision model can output more
+                $max_tokens_param => 8000, // Increased for large prompts
             );
+            
+            // Only add temperature for models that support it
+            if (!$this->is_temperature_restricted_model($model)) {
+                $body['temperature'] = 0.7;
+            }
         } else {
             // Standard text-only request
-            $body = array(
-                'model' => $model,
-                'messages' => array(
-                    array(
-                        'role' => 'user',
-                        'content' => $system_prompt
-                    )
-                ),
-                'temperature' => 0.7,
-                'max_tokens' => 2000,
-            );
+            // Use the appropriate max tokens parameter based on model
+            $max_tokens_param = $this->get_max_tokens_parameter($model);
+            
+            // Build body array; use Responses API schema for GPT-5 (non-chat) models
+            if ($uses_responses_api) {
+                $body = array(
+                    'model' => $model,
+                    // Responses API: text.format expects an object: { type: 'text' | 'json_object' | 'json_schema' }
+                    'text' => array('format' => array('type' => 'text')),
+                    // Provide input as a single text item for maximum compatibility
+                    'input' => trim($system_prompt . "\n\n" . $prompt),
+                    'temperature' => $this->is_temperature_restricted_model($model) ? null : 0.7,
+                    'max_output_tokens' => 12000,
+                );
+                if ($body['temperature'] === null) {
+                    unset($body['temperature']);
+                }
+            } else {
+                $body = array(
+                    'model' => $model,
+                    'messages' => array(
+                        array('role' => 'system', 'content' => $system_prompt),
+                        array('role' => 'user', 'content' => $prompt)
+                    ),
+                    $max_tokens_param => 8000,
+                );
+            }
+            
+            // Only add temperature for models that support it
+            if (!$this->is_temperature_restricted_model($model)) {
+                $body['temperature'] = 0.7;
+            }
         }
 
-        // Make the API request
-        $response = wp_remote_post($this->openai_api_url, array(
+        // Make the API request with extended timeout for complex generations
+        $target_url = $uses_responses_api ? $this->openai_responses_url : $this->openai_api_url;
+        $response = wp_remote_post($target_url, array(
             'headers' => array(
                 'Content-Type' => 'application/json',
                 'Authorization' => 'Bearer ' . $api_key,
             ),
             'body' => json_encode($body),
-            'timeout' => 30,
+            'timeout' => 300, // 5 minutes timeout for complex requests
         ));
 
         // Check for errors
@@ -363,6 +339,24 @@ class StepFox_AI_API {
                 ? $response_data['error']['message'] 
                 : __('Unknown API error', 'stepfox-ai');
             
+            // Log error details for debugging intermittent issues
+            error_log('StepFox AI - API Error: ' . $error_message . ' (HTTP ' . $response_code . ')');
+            error_log('StepFox AI - Model: ' . $model);
+            error_log('StepFox AI - Prompt length (user input only): ' . strlen($prompt));
+            
+            // Check for rate limiting
+            if ($response_code === 429 || stripos($error_message, 'rate') !== false) {
+                $error_message = __('Rate limit exceeded. Please wait 20 seconds and try again.', 'stepfox-ai');
+            }
+            // Check for quota issues
+            elseif (stripos($error_message, 'quota') !== false || stripos($error_message, 'billing') !== false) {
+                $error_message = __('API quota exceeded. Check your OpenAI account billing.', 'stepfox-ai');
+            }
+            // Check for model issues
+            elseif (stripos($error_message, 'model') !== false && stripos($error_message, 'not found') !== false) {
+                $error_message = __('Model not available. Please select a different model in settings.', 'stepfox-ai');
+            }
+            
             return new WP_Error(
                 'openai_error',
                 sprintf(__('OpenAI API Error: %s', 'stepfox-ai'), $error_message),
@@ -372,7 +366,29 @@ class StepFox_AI_API {
 
         // Extract the generated code
         $generated_code = '';
-        if (isset($response_data['choices'][0]['message']['content'])) {
+        $model_used = $model;
+        if ($uses_responses_api) {
+            // Responses API: prefer consolidated output_text; fallback to text array under output[...]
+            if (!empty($response_data['output_text']) && is_string($response_data['output_text'])) {
+                $generated_code = $response_data['output_text'];
+            } elseif (!empty($response_data['output']) && is_array($response_data['output'])) {
+                // Traverse output array to find first text item
+                foreach ($response_data['output'] as $out) {
+                    if (isset($out['content']) && is_array($out['content'])) {
+                        foreach ($out['content'] as $contentItem) {
+                            if (isset($contentItem['type']) && $contentItem['type'] === 'output_text' && isset($contentItem['text'])) {
+                                $generated_code = $contentItem['text'];
+                                break 2;
+                            }
+                            if (isset($contentItem['text'])) {
+                                $generated_code = $contentItem['text'];
+                                break 2;
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (isset($response_data['choices'][0]['message']['content'])) {
             $generated_code = $response_data['choices'][0]['message']['content'];
             
             // Clean up any markdown formatting if present
@@ -380,11 +396,71 @@ class StepFox_AI_API {
             $generated_code = trim($generated_code);
         }
 
+        // If the model returned an empty string, try a reliable fallback pathway via chat model
+        if ($generated_code === '') {
+            error_log('StepFox AI - Empty generation received from model ' . $model . ' — attempting fallback to chat model.');
+            // Build chat completion fallback with GPT‑5 chat; if that fails, try GPT‑4o
+            $fallback_models = array('gpt-5-chat-latest', 'gpt-4o');
+            foreach ($fallback_models as $fb_model) {
+                $fb_max_tokens_param = $this->get_max_tokens_parameter($fb_model);
+                $fb_body = array(
+                    'model' => $fb_model,
+                    'messages' => array(
+                        array('role' => 'system', 'content' => $system_prompt),
+                        array('role' => 'user', 'content' => $prompt),
+                    ),
+                    $fb_max_tokens_param => 6000,
+                );
+                if (!$this->is_temperature_restricted_model($fb_model)) {
+                    $fb_body['temperature'] = 0.7;
+                }
+
+                $fb_response = wp_remote_post($this->openai_api_url, array(
+                    'headers' => array(
+                        'Content-Type' => 'application/json',
+                        'Authorization' => 'Bearer ' . $api_key,
+                    ),
+                    'body' => json_encode($fb_body),
+                    'timeout' => 300,
+                ));
+                if (!is_wp_error($fb_response)) {
+                    $fb_code = wp_remote_retrieve_response_code($fb_response);
+                    $fb_body_raw = wp_remote_retrieve_body($fb_response);
+                    $fb_data = json_decode($fb_body_raw, true);
+                    if ($fb_code === 200 && isset($fb_data['choices'][0]['message']['content'])) {
+                        $generated_code = trim(preg_replace('/^```(javascript|js|html)?\n|```$/m', '', $fb_data['choices'][0]['message']['content']));
+                        if ($generated_code !== '') {
+                            error_log('StepFox AI - Fallback via ' . $fb_model . ' succeeded.');
+                            $model_used = $fb_model;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if ($generated_code === '') {
+                // Still empty — surface helpful error and include snapshot
+                $snapshot = substr(json_encode($response_data), 0, 2000);
+                error_log('StepFox AI - All fallbacks failed. Response snapshot: ' . $snapshot);
+                return new WP_REST_Response(array(
+                    'success' => false,
+                    'message' => __('Model returned an empty response. Try refining the prompt or switching models.', 'stepfox-ai'),
+                    'raw' => $response_data,
+                    'prompt_length' => $system_prompt_length,
+                    'prompt_preview' => $system_prompt_preview,
+                ), 200);
+            }
+        }
+
         // Return the response
         return new WP_REST_Response(array(
             'success' => true,
             'code' => $generated_code,
             'usage' => isset($response_data['usage']) ? $response_data['usage'] : null,
+            'model_used' => $model_used,
+            'api' => $uses_responses_api ? 'responses' : 'chat',
+            'prompt_length' => $system_prompt_length,
+            'prompt_preview' => $system_prompt_preview,
         ), 200);
     }
     
@@ -501,5 +577,66 @@ class StepFox_AI_API {
         }
         
         return false;
+    }
+    
+    /**
+     * Get the appropriate max tokens parameter name based on model
+     *
+     * @param string $model The model name
+     * @return string The parameter name to use
+     */
+    private function get_max_tokens_parameter($model) {
+        // Models that use the new max_completion_tokens parameter
+        $new_parameter_models = array(
+            'gpt-4o',
+            'gpt-4o-mini',
+            'gpt-4-turbo',
+            'gpt-4-turbo-preview',
+            'gpt-5',           
+            'gpt-5-mini',      
+            'gpt-5-nano',      
+            'gpt-5-chat-latest'
+        );
+        
+        // Check if this model uses the new parameter
+        if (in_array($model, $new_parameter_models)) {
+            return 'max_completion_tokens';
+        }
+        
+        // Default to the classic parameter
+        return 'max_tokens';
+    }
+    
+    /**
+     * Check if a model doesn't support custom temperature values
+     *
+     * @param string $model The model name
+     * @return bool True if temperature is restricted, false otherwise
+     */
+    private function is_temperature_restricted_model($model) {
+        // Models that only support default temperature value of 1
+        // Check if model contains 'o' variant (like gpt-4o, gpt-4o-mini, etc)
+        if (strpos($model, 'gpt-4o') !== false) {
+            return true;
+        }
+        
+        // Check if it's any GPT-5 model (they may have temperature restrictions)
+        if (strpos($model, 'gpt-5') !== false) {
+            return true;
+        }
+        
+        // Specific models that only support default temperature
+        $restricted_models = array(
+            'gpt-4o',
+            'gpt-4o-mini',
+            'gpt-4o-2024-05-13',  // Date-versioned models
+            'gpt-4o-2024-08-06',
+            'gpt-5',              
+            'gpt-5-mini',        
+            'gpt-5-nano',             
+            'gpt-5-chat-latest'
+        );
+        
+        return in_array($model, $restricted_models);
     }
 }

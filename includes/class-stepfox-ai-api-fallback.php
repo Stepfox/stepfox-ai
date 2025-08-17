@@ -20,6 +20,10 @@ class StepFox_AI_API_Fallback {
      * Handle AJAX generation request
      */
     public function handle_ajax_generate() {
+        // Extend PHP execution time for long-running AI requests
+        @set_time_limit(300); // 5 minutes
+        @ini_set('max_execution_time', 300);
+        
         // Check nonce
         if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'stepfox_ai_fallback_nonce')) {
             wp_send_json_error('Security check failed', 403);
@@ -42,6 +46,7 @@ class StepFox_AI_API_Fallback {
         }
         
         // Use the same API logic
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-stepfox-ai-api.php';
         $api = new StepFox_AI_API('stepfox-ai', STEPFOX_AI_VERSION);
         
         // Create a mock REST request

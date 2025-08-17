@@ -105,7 +105,14 @@
             var helpTexts = {
                 'gpt-3.5-turbo': 'Fast and cost-effective for most tasks',
                 'gpt-4': 'More capable but slower and more expensive',
-                'gpt-4-turbo-preview': 'Latest GPT-4 model with improved performance'
+                'gpt-4-turbo-preview': 'Latest GPT-4 model with improved performance',
+                'gpt-4-vision-preview': 'Can analyze and understand images',
+                'gpt-4o': 'Latest multimodal model with vision capabilities',
+                'gpt-4o-mini': 'Faster, cost-effective multimodal model',
+                'gpt-5': 'Complex reasoning, code-heavy and multi-step tasks',
+                'gpt-5-mini': 'Cost-optimized reasoning, balances speed and capability',
+                'gpt-5-nano': 'High-throughput, simple instruction-following tasks',
+                'gpt-5-chat-latest': 'Latest GPT-5 chat model'
             };
             
             var selectedModel = $(this).val();

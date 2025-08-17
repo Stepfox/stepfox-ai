@@ -1,0 +1,78 @@
+// RESPONSIVE EXTENSION ATTRIBUTE KEYS
+// Copy these for use in your WordPress blocks
+
+// SYSTEM ATTRIBUTES
+customId
+device
+element_state
+custom_css
+custom_js
+animation
+animation_delay
+animation_duration
+
+// RESPONSIVE STYLES PROPERTIES
+// Each property below can have desktop/tablet/mobile values
+responsiveStyles.position
+responsiveStyles.display
+responsiveStyles.grid_template_columns
+responsiveStyles.width
+responsiveStyles.height
+responsiveStyles.min_width
+responsiveStyles.max_width
+responsiveStyles.min_height
+responsiveStyles.max_height
+responsiveStyles.top
+responsiveStyles.right
+responsiveStyles.bottom
+responsiveStyles.left
+responsiveStyles.z_index
+responsiveStyles.order
+responsiveStyles.box_sizing
+responsiveStyles.visibility
+responsiveStyles.float
+responsiveStyles.clear
+responsiveStyles.overflow
+responsiveStyles.zoom
+responsiveStyles.font_size
+responsiveStyles.line_height
+responsiveStyles.font_weight
+responsiveStyles.font_style
+responsiveStyles.text_transform
+responsiveStyles.text_decoration
+responsiveStyles.textAlign
+responsiveStyles.letter_spacing
+responsiveStyles.word_spacing
+responsiveStyles.text_shadow
+responsiveStyles.padding (object with top/right/bottom/left)
+responsiveStyles.margin (object with top/right/bottom/left)
+responsiveStyles.borderWidth (object with top/right/bottom/left)
+responsiveStyles.borderStyle (object with top/right/bottom/left)
+responsiveStyles.borderColor (object with top/right/bottom/left)
+responsiveStyles.borderRadius (object with topLeft/topRight/bottomLeft/bottomRight)
+responsiveStyles.flex_direction
+responsiveStyles.justify
+responsiveStyles.flexWrap
+responsiveStyles.flex_grow
+responsiveStyles.flex_shrink
+responsiveStyles.align_items
+responsiveStyles.align_self
+responsiveStyles.justify_self
+responsiveStyles.gap
+responsiveStyles.align_content
+responsiveStyles.background_color
+responsiveStyles.background_image
+responsiveStyles.background_size
+responsiveStyles.background_position
+responsiveStyles.background_repeat
+responsiveStyles.transform
+responsiveStyles.transition
+responsiveStyles.box_shadow
+responsiveStyles.filter
+responsiveStyles.backdrop_filter
+responsiveStyles.opacity
+responsiveStyles.object_fit
+responsiveStyles.object_position
+responsiveStyles.cursor
+responsiveStyles.user_select
+responsiveStyles.pointer_events
