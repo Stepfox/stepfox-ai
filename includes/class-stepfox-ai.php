@@ -72,6 +72,11 @@ class StepFox_AI {
      * @access   private
      */
     private function load_dependencies() {
+        // Ensure required class files are loaded
+        require_once plugin_dir_path(__FILE__) . 'class-stepfox-ai-admin.php';
+        require_once plugin_dir_path(__FILE__) . 'class-stepfox-ai-api.php';
+        require_once plugin_dir_path(__FILE__) . 'class-stepfox-ai-api-fallback.php';
+
         // The admin-specific functionality of the plugin.
         if (is_admin()) {
             $this->admin = new StepFox_AI_Admin($this->get_plugin_name(), $this->get_version());
@@ -80,8 +85,7 @@ class StepFox_AI {
         // The API handler for OpenAI requests
         $this->api = new StepFox_AI_API($this->get_plugin_name(), $this->get_version());
         
-        // Include and initialize the fallback API handler for environments with REST issues
-        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-stepfox-ai-api-fallback.php';
+        // Initialize the fallback API handler for environments with REST issues
         new StepFox_AI_API_Fallback();
     }
 

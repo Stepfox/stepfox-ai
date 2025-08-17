@@ -8,33 +8,17 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-/**
- * Register test block
- */
-function stepfox_ai_register_test_block() {
-    wp_register_script(
-        'stepfox-ai-test-block',
-        STEPFOX_AI_PLUGIN_URL . 'blocks/test-block.js',
-        array('wp-blocks', 'wp-element'),
-        STEPFOX_AI_VERSION,
-        true
-    );
-    
-    register_block_type('stepfox-ai/test-block', array(
-        'editor_script' => 'stepfox-ai-test-block',
-    ));
-}
-add_action('init', 'stepfox_ai_register_test_block');
+// (test block removed)
 
 /**
  * Register the block on the server side
  */
 function stepfox_ai_register_console_runner_block() {
-    // Register block editor script
+    // Register block editor script (use the enhanced basic implementation)
     wp_register_script(
         'stepfox-ai-console-runner',
-        STEPFOX_AI_PLUGIN_URL . 'blocks/ai-console-runner/ai-console-runner.js',
-        array('wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n'),
+        STEPFOX_AI_PLUGIN_URL . 'blocks/ai-console-runner/ai-console-runner-basic.js',
+        array('wp-blocks', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-i18n', 'wp-data'),
         STEPFOX_AI_VERSION,
         true
     );
@@ -51,6 +35,9 @@ function stepfox_ai_register_console_runner_block() {
     wp_localize_script('stepfox-ai-console-runner', 'stepfoxAI', array(
         'apiUrl' => rest_url('stepfox-ai/v1/generate'),
         'nonce' => wp_create_nonce('wp_rest'),
+        'ajaxUrl' => admin_url('admin-ajax.php'),
+        'fallbackNonce' => wp_create_nonce('stepfox_ai_fallback_nonce'),
+        'model' => get_option('stepfox_ai_openai_model', 'gpt-3.5-turbo'),
     ));
 
     // Register the block with dynamic rendering
@@ -76,18 +63,22 @@ add_action('init', 'stepfox_ai_register_console_runner_block');
  * Render callback for the block
  */
 function stepfox_ai_render_console_runner_block($attributes, $content) {
-    // For frontend, just show the code in a pre block
-    $output = '<div class="stepfox-ai-output">';
-    
-    if (!empty($attributes['promptContent'])) {
-        $output .= '<p class="stepfox-ai-prompt"><strong>Prompt:</strong> ' . esc_html($attributes['promptContent']) . '</p>';
+    // Frontend rendering: if codeContent contains WordPress block markup, render it as blocks.
+    $code = isset($attributes['codeContent']) ? (string) $attributes['codeContent'] : '';
+
+    // If no code, render nothing
+    if ($code === '') {
+        return '';
     }
-    
-    if (!empty($attributes['codeContent'])) {
-        $output .= '<pre class="stepfox-ai-code"><code>' . esc_html($attributes['codeContent']) . '</code></pre>';
+
+    // If AI returned block markup (<!-- wp:... -->) render via do_blocks
+    if (stripos($code, '<!-- wp:') !== false) {
+        // Ensure core function exists
+        if (function_exists('do_blocks')) {
+            return '<div class="stepfox-ai-output">' . do_blocks($code) . '</div>';
+        }
     }
-    
-    $output .= '</div>';
-    
-    return $output;
+
+    // Otherwise, treat as plain HTML (sanitize for safety)
+    return '<div class="stepfox-ai-output">' . wp_kses_post($code) . '</div>';
 }
