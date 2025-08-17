@@ -147,13 +147,16 @@ class StepFox_AI_API {
             $base_prompt = $settings_system_prompt;
         }
         
-        // Define vision-capable models
+        // Define vision-capable models (GPT-5 conditional via setting)
+        $gpt5_images_enabled = (bool) get_option('stepfox_ai_gpt5_images', false);
         $vision_models = array(
             'gpt-4-vision-preview', 
             'gpt-4o', 
             'gpt-4o-mini'
-            // Note: GPT-5 models don't have vision capabilities yet
         );
+        if ($gpt5_images_enabled) {
+            $vision_models = array_merge($vision_models, array('gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-chat-latest'));
+        }
         
         // GPT-5 models are available via API aliases; log selection
         $gpt5_models = array('gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-chat-latest');
@@ -207,91 +210,65 @@ class StepFox_AI_API {
         }
 
         // Determine if this model should use the Responses API (GPT-5 text family)
-        $uses_responses_api = in_array($model, array('gpt-5', 'gpt-5-mini', 'gpt-5-nano'));
+        $gpt5_text_models = array('gpt-5', 'gpt-5-mini', 'gpt-5-nano');
+        $uses_responses_api = in_array($model, $gpt5_text_models);
+        // If GPT‑5 images are enabled and images are present, force Chat Completions (messages) instead of Responses API
+        $force_chat_for_images = ($gpt5_images_enabled && in_array($model, $gpt5_text_models, true) && !empty($images));
+        if ($force_chat_for_images) {
+            // Ensure both endpoint and body builder use Chat schema
+            $uses_responses_api = false;
+        }
 
         // Prepare the request body based on model type
-        if (in_array($model, $vision_models) && !empty($images) && is_array($images)) {
-            // For GPT-4 Vision with images
-            $user_content = array(
-                array(
-                    'type' => 'text',
-                    'text' => $system_prompt
-                )
+        $has_images = !empty($images) && is_array($images);
+        if ($uses_responses_api) {
+            // Responses API schema with input content blocks
+            $content = array(
+                array('type' => 'input_text', 'text' => trim($system_prompt . "\n\n" . $prompt))
             );
-            
-            // Add each image URL for vision analysis
-            foreach ($images as $image) {
-                if (isset($image['url'])) {
+            if ($has_images) {
+                foreach ($images as $image) {
+                    if (!isset($image['url'])) { continue; }
                     $image_url = $image['url'];
-                    
-                    // Check if this is a local URL
                     $is_local = $this->is_local_url($image_url);
-                    
-                    if ($is_local) {
-                        // Convert local image to base64
-                        $base64_image = $this->convert_local_image_to_base64($image_url);
-                        if ($base64_image) {
-                            $user_content[] = array(
-                                'type' => 'image_url',
-                                'image_url' => array(
-                                    'url' => $base64_image,
-                                    'detail' => 'auto'
-                                )
-                            );
-                        } else {
-                            error_log('StepFox AI - Failed to convert local image: ' . $image_url);
-                        }
-                    } else {
-                        // Use the URL directly for external images
-                        $user_content[] = array(
-                            'type' => 'image_url',
-                            'image_url' => array(
-                                'url' => $image_url,
-                                'detail' => 'auto'
-                            )
-                        );
-                    }
+                    $final_url = $is_local ? $this->convert_local_image_to_base64($image_url) : $image_url;
+                    if (!$final_url) { continue; }
+                    $content[] = array(
+                        'type' => 'input_image',
+                        'image_url' => array('url' => $final_url)
+                    );
                 }
             }
-            
-            // Use the appropriate max tokens parameter based on model
-            $max_tokens_param = $this->get_max_tokens_parameter($model);
-            
-            // Build body array for Vision models (Chat Completions only)
             $body = array(
                 'model' => $model,
-                'messages' => array(
-                    array(
-                        'role' => 'user',
-                        'content' => $user_content
-                    )
+                'input' => array(
+                    array('role' => 'user', 'content' => $content)
                 ),
-                $max_tokens_param => 8000, // Increased for large prompts
+                'text' => array('format' => array('type' => 'text')),
+                'max_output_tokens' => 12000,
             );
-            
-            // Only add temperature for models that support it
             if (!$this->is_temperature_restricted_model($model)) {
                 $body['temperature'] = 0.7;
             }
         } else {
-            // Standard text-only request
-            // Use the appropriate max tokens parameter based on model
+            // Chat Completions schema
             $max_tokens_param = $this->get_max_tokens_parameter($model);
-            
-            // Build body array; use Responses API schema for GPT-5 (non-chat) models
-            if ($uses_responses_api) {
+            if (in_array($model, $vision_models) && $has_images) {
+                // user content array: text + image_url parts
+                $user_content = array(array('type' => 'text', 'text' => trim($system_prompt . "\n\n" . $prompt)));
+                foreach ($images as $image) {
+                    if (!isset($image['url'])) { continue; }
+                    $image_url = $image['url'];
+                    $is_local = $this->is_local_url($image_url);
+                    $final_url = $is_local ? $this->convert_local_image_to_base64($image_url) : $image_url;
+                    if (!$final_url) { continue; }
+                    $user_content[] = array('type' => 'image_url', 'image_url' => array('url' => $final_url, 'detail' => 'auto'));
+                }
                 $body = array(
                     'model' => $model,
-                    // Responses API: text.format expects an object: { type: 'text' | 'json_object' | 'json_schema' }
-                    'text' => array('format' => array('type' => 'text')),
-                    // Provide input as a single text item for maximum compatibility
-                    'input' => trim($system_prompt . "\n\n" . $prompt),
-                    'temperature' => $this->is_temperature_restricted_model($model) ? null : 0.7,
-                    'max_output_tokens' => 12000,
+                    'messages' => array(array('role' => 'user', 'content' => $user_content)),
+                    $max_tokens_param => 8000,
                 );
-                if ($body['temperature'] === null) {
-                    unset($body['temperature']);
-                }
             } else {
                 $body = array(
                     'model' => $model,
@@ -302,15 +279,13 @@ class StepFox_AI_API {
                     $max_tokens_param => 8000,
                 );
             }
-            
-            // Only add temperature for models that support it
             if (!$this->is_temperature_restricted_model($model)) {
                 $body['temperature'] = 0.7;
             }
         }
 
         // Make the API request with extended timeout for complex generations
-        $target_url = $uses_responses_api ? $this->openai_responses_url : $this->openai_api_url;
+        $target_url = ($uses_responses_api && !$force_chat_for_images) ? $this->openai_responses_url : $this->openai_api_url;
         $response = wp_remote_post($target_url, array(
             'headers' => array(
                 'Content-Type' => 'application/json',

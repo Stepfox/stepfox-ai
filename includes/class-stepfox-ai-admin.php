@@ -196,6 +196,25 @@ class StepFox_AI_Admin {
             'stepfox_ai_openai_section'
         );
 
+        // Experimental: Enable images for GPT-5 models
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_gpt5_images',
+            array(
+                'type' => 'boolean',
+                'sanitize_callback' => function($v){ return (bool)$v; },
+                'default' => false,
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_gpt5_images',
+            __('Enable images for GPT‑5 (experimental)', 'stepfox-ai'),
+            array($this, 'gpt5_images_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
+
         // System prompt
         register_setting(
             'stepfox_ai_settings',
@@ -284,6 +303,20 @@ class StepFox_AI_Admin {
         <p class="description">
             <?php _e('Optional. Prepended to every request as the system prompt. Leave blank to use only the user prompt. You can include guidelines for WordPress blocks, responsiveStyles, etc.', 'stepfox-ai'); ?>
         </p>
+        <?php
+    }
+
+    /**
+     * Experimental GPT‑5 images toggle field
+     */
+    public function gpt5_images_field_callback() {
+        $enabled = (bool) get_option('stepfox_ai_gpt5_images', false);
+        ?>
+        <label>
+            <input type="checkbox" name="stepfox_ai_gpt5_images" value="1" <?php checked($enabled, true); ?> />
+            <?php _e('Allow sending images to GPT‑5 models via Responses API (may be unstable/unsupported).', 'stepfox-ai'); ?>
+        </label>
+        <p class="description"><?php _e('When enabled, image URLs or base64 data will be included for GPT‑5 requests. Use only if your GPT‑5 tier supports vision.', 'stepfox-ai'); ?></p>
         <?php
     }
 
