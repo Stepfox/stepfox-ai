@@ -75,7 +75,18 @@ function stepfox_ai_render_console_runner_block($attributes, $content) {
     if (stripos($code, '<!-- wp:') !== false) {
         // Ensure core function exists
         if (function_exists('do_blocks')) {
-            return '<div class="stepfox-ai-output">' . do_blocks($code) . '</div>';
+            // Attempt to normalize malformed block markup by parsing and re-serializing
+            $normalized = $code;
+            if (function_exists('parse_blocks') && function_exists('serialize_block')) {
+                $blocks = parse_blocks($code);
+                if (is_array($blocks) && !empty($blocks)) {
+                    $normalized = '';
+                    foreach ($blocks as $b) {
+                        $normalized .= serialize_block($b);
+                    }
+                }
+            }
+            return '<div class="stepfox-ai-output">' . do_blocks($normalized) . '</div>';
         }
     }
 

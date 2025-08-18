@@ -139,6 +139,11 @@ class StepFox_AI_Admin {
                 submit_button();
                 ?>
             </form>
+
+            <hr/>
+            <h2><?php _e('Background Jobs', 'stepfox-ai'); ?></h2>
+            <p class="description"><?php _e('Recent AI generation jobs (queued/processing/done). Refresh to update.', 'stepfox-ai'); ?></p>
+            <?php echo $this->render_jobs_table(); ?>
         </div>
         <?php
     }
@@ -421,5 +426,53 @@ class StepFox_AI_Admin {
         }
 
         wp_send_json_success('Connection successful!');
+    }
+
+    /**
+     * Render jobs table based on transients
+     */
+    private function render_jobs_table() {
+        global $wpdb;
+        $like_job = $wpdb->esc_like('_transient_stepfox_ai_job_') . '%';
+        $results = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s ORDER BY option_id DESC LIMIT 50",
+                $like_job
+            )
+        );
+        if (!$results) {
+            return '<p>' . esc_html__('No jobs found yet.', 'stepfox-ai') . '</p>';
+        }
+        $rows = '';
+        foreach ($results as $row) {
+            $name = $row->option_name;
+            $job_id = str_replace('_transient_stepfox_ai_job_', '', $name);
+            $data = maybe_unserialize($row->option_value);
+            $status = isset($data['status']) ? $data['status'] : 'unknown';
+            $time = isset($data['finished']) ? (int)$data['finished'] : (isset($data['created']) ? (int)$data['created'] : 0);
+            $when = $time ? date_i18n('Y-m-d H:i:s', $time) : '-';
+            $success = isset($data['data']['success']) ? ($data['data']['success'] ? 'true' : 'false') : '';
+            $actions = '<button class="button cancel-job" data-job="' . esc_attr($job_id) . '">' . esc_html__('Cancel', 'stepfox-ai') . '</button> '
+                . '<button class="button delete-job" data-job="' . esc_attr($job_id) . '">' . esc_html__('Delete', 'stepfox-ai') . '</button>';
+            $rows .= '<tr>'
+                . '<td><code>' . esc_html($job_id) . '</code></td>'
+                . '<td>' . esc_html($status) . '</td>'
+                . '<td>' . esc_html($when) . '</td>'
+                . '<td>' . esc_html($success) . '</td>'
+                . '<td>' . $actions . '</td>'
+                . '</tr>';
+        }
+        $table = '<table class="widefat striped"><thead><tr>'
+            . '<th>' . esc_html__('Job ID', 'stepfox-ai') . '</th>'
+            . '<th>' . esc_html__('Status', 'stepfox-ai') . '</th>'
+            . '<th>' . esc_html__('Time', 'stepfox-ai') . '</th>'
+            . '<th>' . esc_html__('Success', 'stepfox-ai') . '</th>'
+            . '<th>' . esc_html__('Actions', 'stepfox-ai') . '</th>'
+            . '</tr></thead><tbody>' . $rows . '</tbody></table>';
+ 
+        $rest_base = rest_url('stepfox-ai/v1');
+        $nonce = wp_create_nonce('wp_rest');
+        $table .= '<script>document.addEventListener("click",function(e){var b=e.target.closest(".cancel-job,.delete-job");if(!b)return;var job=b.getAttribute("data-job");var isDelete=b.classList.contains("delete-job");var endpoint=isDelete?"/job/delete":"/job/cancel";fetch(' . json_encode($rest_base) . '+endpoint,{method:"POST",headers:{"Content-Type":"application/json","X-WP-Nonce":' . json_encode($nonce) . '},body:JSON.stringify({job_id:job})}).then(function(r){return r.json().catch(function(){return {};});}).then(function(){location.reload();}).catch(function(err){alert("Request failed: "+err.message);});});</script>';
+        return $table;
     }
 }

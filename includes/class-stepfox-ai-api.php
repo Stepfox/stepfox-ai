@@ -71,8 +71,59 @@ class StepFox_AI_API {
                     'type' => 'array',
                     'default' => array()
                 ),
+                'async' => array(
+                    'required' => false,
+                    'type' => 'boolean',
+                    'default' => true
+                ),
             ),
         ));
+
+        // Poll job status
+        register_rest_route('stepfox-ai/v1', '/job', array(
+            'methods' => 'GET',
+            'callback' => array($this, 'get_job_status'),
+            'permission_callback' => array($this, 'check_permission'),
+            'args' => array(
+                'job_id' => array(
+                    'required' => true,
+                    'type' => 'string'
+                ),
+            ),
+        ));
+
+        // Cancel job
+        register_rest_route('stepfox-ai/v1', '/job/cancel', array(
+            'methods' => 'POST',
+            'callback' => array($this, 'cancel_job'),
+            'permission_callback' => array($this, 'check_permission'),
+            'args' => array(
+                'job_id' => array(
+                    'required' => true,
+                    'type' => 'string'
+                ),
+            ),
+        ));
+
+        // Delete job
+        register_rest_route('stepfox-ai/v1', '/job/delete', array(
+            'methods' => 'POST',
+            'callback' => array($this, 'delete_job'),
+            'permission_callback' => array($this, 'check_permission'),
+            'args' => array(
+                'job_id' => array(
+                    'required' => true,
+                    'type' => 'string'
+                ),
+            ),
+        ));
+
+        // Register background processor via AJAX for non-blocking execution
+        add_action('wp_ajax_stepfox_ai_process_job', array($this, 'process_job'));
+        add_action('wp_ajax_nopriv_stepfox_ai_process_job', array($this, 'process_job'));
+
+        // Also register a WP-Cron event handler as a robust fallback when loopback HTTP is blocked
+        add_action('stepfox_ai_process_job_event', array($this, 'process_job_cron'), 10, 1);
     }
 
     /**
@@ -83,7 +134,7 @@ class StepFox_AI_API {
      */
     public function check_permission($request) {
         // Check if user is authenticated
-        if (current_user_can('edit_posts')) {
+        if (current_user_can('edit_posts') || current_user_can('manage_options')) {
             return true;
         }
         
@@ -120,6 +171,7 @@ class StepFox_AI_API {
         
         $prompt = $request->get_param('prompt');
         $images = $request->get_param('images');
+        $is_async = filter_var($request->get_param('async'), FILTER_VALIDATE_BOOLEAN);
         $api_key = get_option('stepfox_ai_openai_api_key', '');
         $model = get_option('stepfox_ai_openai_model', 'gpt-3.5-turbo');
 
@@ -134,6 +186,47 @@ class StepFox_AI_API {
                 __('OpenAI API key is not configured. Please configure it in the StepFox AI settings.', 'stepfox-ai'),
                 array('status' => 400)
             );
+        }
+
+        // If async, enqueue background task and return immediately
+        if ($is_async) {
+            $job_id = wp_generate_uuid4();
+            set_transient('stepfox_ai_job_' . $job_id, array(
+                'status' => 'queued',
+                'created' => time()
+            ), 15 * MINUTE_IN_SECONDS);
+            set_transient('stepfox_ai_payload_' . $job_id, array(
+                'prompt' => $prompt,
+                'images' => $images,
+            ), 15 * MINUTE_IN_SECONDS);
+
+            error_log('StepFox AI - Async job queued: ' . $job_id . ' | Prompt length: ' . strlen($prompt) . ' | Images: ' . (is_array($images) ? count($images) : 0));
+
+            // Fire background AJAX to process the job (non-blocking)
+            wp_remote_post(admin_url('admin-ajax.php'), array(
+                'timeout' => 1, // allow connection to establish
+                'blocking' => false,
+                'sslverify' => false,
+                'body' => array(
+                    'action' => 'stepfox_ai_process_job',
+                    'job_id' => $job_id,
+                ),
+            ));
+
+            // Schedule immediate WP-Cron fallback (runs on next hit) in case loopback HTTP is blocked
+            if (!wp_next_scheduled('stepfox_ai_process_job_event', array($job_id))) {
+                wp_schedule_single_event(time(), 'stepfox_ai_process_job_event', array($job_id));
+            }
+
+            // Try to trigger WP-Cron immediately via loopback request (non-blocking)
+            $cron_url = site_url('wp-cron.php?doing_wp_cron=' . urlencode(microtime(true)));
+            wp_remote_post($cron_url, array('timeout' => 1, 'blocking' => false, 'sslverify' => false));
+
+            return new WP_REST_Response(array(
+                'success' => true,
+                'async' => true,
+                'job_id' => $job_id,
+            ), 200);
         }
 
         // Prepare the system prompt based on model capabilities
@@ -284,6 +377,10 @@ class StepFox_AI_API {
             }
         }
 
+        // Release PHP session locks before long-running external call to avoid freezing other requests for this user
+        if (function_exists('session_status') && session_status() === PHP_SESSION_ACTIVE) {
+            @session_write_close();
+        }
         // Make the API request with extended timeout for complex generations
         $target_url = ($uses_responses_api && !$force_chat_for_images) ? $this->openai_responses_url : $this->openai_api_url;
         $response = wp_remote_post($target_url, array(
@@ -293,6 +390,7 @@ class StepFox_AI_API {
             ),
             'body' => json_encode($body),
             'timeout' => 300, // 5 minutes timeout for complex requests
+            'blocking' => true,
         ));
 
         // Check for errors
@@ -306,6 +404,10 @@ class StepFox_AI_API {
 
         $response_code = wp_remote_retrieve_response_code($response);
         $response_body = wp_remote_retrieve_body($response);
+        // Re-open session after network call if needed
+        if (function_exists('session_status') && session_status() === PHP_SESSION_NONE) {
+            // Do not start a session; WordPress typically doesn't use PHP sessions. Just ensure we didn't leave it open.
+        }
         $response_data = json_decode($response_body, true);
 
         // Check for API errors
@@ -427,6 +529,28 @@ class StepFox_AI_API {
             }
         }
 
+        // First, normalize inline styles to match Gutenberg save output (expand shorthands, strip invalid values).
+        // IMPORTANT: Do NOT touch block JSON attributes; we only edit inline CSS in the HTML wrappers.
+        if (!empty($generated_code)) {
+            $generated_code = $this->normalize_inline_styles($generated_code);
+            $generated_code = $this->normalize_block_classes($generated_code);
+        }
+
+        // Normalize the generated markup to canonical Gutenberg output to avoid validation errors.
+        // We preserve all original block attributes as returned by parse_blocks, then serialize back.
+        if (!empty($generated_code) && function_exists('parse_blocks') && function_exists('serialize_block')) {
+            $blocks = parse_blocks($generated_code);
+            if (is_array($blocks) && !empty($blocks)) {
+                $normalized = '';
+                foreach ($blocks as $b) {
+                    $normalized .= serialize_block($b);
+                }
+                if (!empty($normalized)) {
+                    $generated_code = $normalized;
+                }
+            }
+        }
+
         // Return the response
         return new WP_REST_Response(array(
             'success' => true,
@@ -438,7 +562,242 @@ class StepFox_AI_API {
             'prompt_preview' => $system_prompt_preview,
         ), 200);
     }
+
+    /**
+     * AJAX background processor: runs the OpenAI generation and stores result in a transient.
+     */
+    public function process_job() {
+        $job_id = isset($_POST['job_id']) ? sanitize_text_field($_POST['job_id']) : '';
+        if (empty($job_id)) { wp_die(); }
+        $this->run_job($job_id);
+        wp_die();
+    }
+
+    /**
+     * Cron-compatible processor
+     */
+    public function process_job_cron($job_id) {
+        $job_id = sanitize_text_field($job_id);
+        if (empty($job_id)) { return; }
+        $this->run_job($job_id);
+    }
+
+    /**
+     * Execute job logic (shared by AJAX and Cron)
+     */
+    private function run_job($job_id) {
+        // If job was canceled, abort
+        $current = get_transient('stepfox_ai_job_' . $job_id);
+        if ($current && isset($current['status']) && $current['status'] === 'canceled') {
+            return;
+        }
+
+        // Mark as processing
+        set_transient('stepfox_ai_job_' . $job_id, array('status' => 'processing', 'created' => isset($current['created']) ? $current['created'] : time()), 15 * MINUTE_IN_SECONDS);
+
+        $payload = get_transient('stepfox_ai_payload_' . $job_id);
+        if (!$payload || empty($payload['prompt'])) { set_transient('stepfox_ai_job_' . $job_id, array('status'=>'error','message'=>'Missing payload'), 5*MINUTE_IN_SECONDS); error_log('StepFox AI - Job ' . $job_id . ' missing payload'); return; }
+        error_log('StepFox AI - Processing job: ' . $job_id);
+
+        // Build a pseudo request object to reuse main logic synchronously
+        $request = new WP_REST_Request('POST', '/stepfox-ai/v1/generate');
+        $request->set_param('prompt', $payload['prompt']);
+        $request->set_param('images', $payload['images']);
+        $request->set_param('async', false);
+
+        $result = $this->handle_generate_request($request);
+        $data = is_wp_error($result) ? array('success'=>false,'message'=>$result->get_error_message()) : $result->get_data();
+
+        set_transient('stepfox_ai_job_' . $job_id, array(
+            'status' => 'done',
+            'data' => $data,
+            'finished' => time()
+        ), 15 * MINUTE_IN_SECONDS);
+        error_log('StepFox AI - Job finished: ' . $job_id . ' | success=' . (isset($data['success']) ? var_export($data['success'], true) : 'n/a'));
+        delete_transient('stepfox_ai_payload_' . $job_id);
+    }
+
+    /**
+     * Cancel a queued/processing job
+     */
+    public function cancel_job($request) {
+        $job_id = sanitize_text_field($request->get_param('job_id'));
+        if (empty($job_id)) {
+            return new WP_REST_Response(array('success'=>false,'message'=>'Missing job_id'), 400);
+        }
+        delete_transient('stepfox_ai_payload_' . $job_id);
+        set_transient('stepfox_ai_job_' . $job_id, array('status'=>'canceled','finished'=>time()), 5 * MINUTE_IN_SECONDS);
+        return new WP_REST_Response(array('success'=>true,'status'=>'canceled'), 200);
+    }
+
+    /**
+     * Delete a job (remove transients)
+     */
+    public function delete_job($request) {
+        $job_id = sanitize_text_field($request->get_param('job_id'));
+        if (empty($job_id)) {
+            return new WP_REST_Response(array('success'=>false,'message'=>'Missing job_id'), 400);
+        }
+        delete_transient('stepfox_ai_payload_' . $job_id);
+        delete_transient('stepfox_ai_job_' . $job_id);
+        return new WP_REST_Response(array('success'=>true,'deleted'=>true), 200);
+    }
+
+    /**
+     * Get job status for polling
+     */
+    public function get_job_status($request) {
+        $job_id = sanitize_text_field($request->get_param('job_id'));
+        $state = get_transient('stepfox_ai_job_' . $job_id);
+        if (!$state) {
+            return new WP_REST_Response(array('success'=>false,'status'=>'missing'), 200);
+        }
+        return new WP_REST_Response(array('success'=>true) + $state, 200);
+    }
     
+    /**
+     * Normalize inline styles for better block validation compatibility
+     * - Expand padding/margin shorthand to individual sides
+     * - Remove obviously invalid values like [object Object]
+     */
+    private function normalize_inline_styles(string $html): string {
+        return preg_replace_callback('/style="([^"]*)"/i', function($m) {
+            $style = $m[1];
+            // Remove placeholders like [object Object]
+            $style = str_replace('[object Object]', '', $style);
+
+            // Parse declarations
+            $decls = array();
+            foreach (explode(';', $style) as $pair) {
+                $pair = trim($pair);
+                if ($pair === '') { continue; }
+                $parts = explode(':', $pair, 2);
+                if (count($parts) !== 2) { continue; }
+                $prop = trim(strtolower($parts[0]));
+                $val  = trim($parts[1]);
+                if ($val === '') { continue; }
+                $decls[$prop] = $val;
+            }
+
+            // Expand padding shorthand
+            if (isset($decls['padding']) && !isset($decls['padding-top']) && !isset($decls['padding-right']) && !isset($decls['padding-bottom']) && !isset($decls['padding-left'])) {
+                $vals = preg_split('/\s+/', $decls['padding']);
+                $t = $r = $b = $l = $vals[0] ?? '0';
+                if (count($vals) === 2) { $b = $t = $vals[0]; $r = $l = $vals[1]; }
+                elseif (count($vals) === 3) { $t = $vals[0]; $r = $l = $vals[1]; $b = $vals[2]; }
+                elseif (count($vals) >= 4) { $t = $vals[0]; $r = $vals[1]; $b = $vals[2]; $l = $vals[3]; }
+                $decls['padding-top']    = $t;
+                $decls['padding-right']  = $r;
+                $decls['padding-bottom'] = $b;
+                $decls['padding-left']   = $l;
+                unset($decls['padding']);
+            }
+
+            // Expand margin shorthand
+            if (isset($decls['margin']) && !isset($decls['margin-top']) && !isset($decls['margin-right']) && !isset($decls['margin-bottom']) && !isset($decls['margin-left'])) {
+                $vals = preg_split('/\s+/', $decls['margin']);
+                $t = $r = $b = $l = $vals[0] ?? '0';
+                if (count($vals) === 2) { $b = $t = $vals[0]; $r = $l = $vals[1]; }
+                elseif (count($vals) === 3) { $t = $vals[0]; $r = $l = $vals[1]; $b = $vals[2]; }
+                elseif (count($vals) >= 4) { $t = $vals[0]; $r = $vals[1]; $b = $vals[2]; $l = $vals[3]; }
+                $decls['margin-top']    = $t;
+                $decls['margin-right']  = $r;
+                $decls['margin-bottom'] = $b;
+                $decls['margin-left']   = $l;
+                unset($decls['margin']);
+            }
+
+            // Rebuild style string preserving order of common properties first
+            $order = array(
+                'border-width','border-style','border-color','border-radius',
+                'padding-top','padding-right','padding-bottom','padding-left',
+                'margin-top','margin-right','margin-bottom','margin-left',
+                'box-shadow','background','background-color','background-image'
+            );
+            $rebuilt = array();
+            foreach ($order as $prop) {
+                if (isset($decls[$prop]) && $decls[$prop] !== '') {
+                    $rebuilt[] = $prop . ':' . $decls[$prop];
+                    unset($decls[$prop]);
+                }
+            }
+            // Append remaining declarations
+            foreach ($decls as $prop => $val) {
+                if ($val === '') { continue; }
+                $rebuilt[] = $prop . ':' . $val;
+            }
+
+            $new = implode(';', $rebuilt);
+            if ($new !== '' && substr($new, -1) !== ';') {
+                $new .= ';';
+            }
+            return 'style="' . esc_attr($new) . '"';
+        }, $html);
+    }
+
+    /**
+     * Normalize classes for specific core blocks to satisfy Gutenberg validation
+     * - core/button: ensure wp-element-button and has-custom-font-size/has-text-color/has-background
+     * - core/group: ensure has-background / has-text-color when inline background/color present
+     */
+    private function normalize_block_classes(string $html): string {
+        // Button <a class="wp-block-button__link ..." ... style="...">
+        $html = preg_replace_callback('/<a([^>]*)class="([^"]*\bwp-block-button__link\b[^"]*)"([^>]*)>(.*?)<\/a>/is', function($m) {
+            $before = $m[1];
+            $classes = $m[2];
+            $after  = $m[3];
+            $inner  = $m[4];
+
+            // Ensure wp-element-button
+            if (strpos($classes, 'wp-element-button') === false) {
+                $classes .= ' wp-element-button';
+            }
+
+            // Inspect style for hints
+            $styleAttr = '';
+            if (preg_match('/style="([^"]*)"/i', $before . $after, $sm)) {
+                $styleAttr = strtolower($sm[1]);
+            }
+            if ($styleAttr !== '') {
+                if (strpos($styleAttr, 'font-size') !== false && strpos($classes, 'has-custom-font-size') === false) {
+                    $classes .= ' has-custom-font-size';
+                }
+                if ((strpos($styleAttr, 'background:') !== false || strpos($styleAttr, 'background-color:') !== false) && strpos($classes, 'has-background') === false) {
+                    $classes .= ' has-background';
+                }
+                if (strpos($styleAttr, 'color:') !== false && strpos($classes, 'has-text-color') === false) {
+                    $classes .= ' has-text-color';
+                }
+            }
+            return '<a' . $before . 'class="' . trim($classes) . '"' . $after . '>' . $inner . '</a>';
+        }, $html);
+
+        // Group <div class="wp-block-group ..." style="...">
+        $html = preg_replace_callback('/<div([^>]*)class="([^"]*\bwp-block-group\b[^"]*)"([^>]*)>/i', function($m) {
+            $before = $m[1];
+            $classes = $m[2];
+            $after  = $m[3];
+            $styleAttr = '';
+            if (preg_match('/style="([^"]*)"/i', $before . $after, $sm)) {
+                $styleAttr = strtolower($sm[1]);
+            }
+            if ($styleAttr !== '') {
+                if ((strpos($styleAttr, 'background:') !== false || strpos($styleAttr, 'background-color:') !== false) && strpos($classes, 'has-background') === false) {
+                    $classes .= ' has-background';
+                }
+                if (strpos($styleAttr, 'color:') !== false && strpos($classes, 'has-text-color') === false) {
+                    $classes .= ' has-text-color';
+                }
+                if ((strpos($styleAttr, 'border-color:') !== false || strpos($styleAttr, 'border:') !== false) && strpos($classes, 'has-border-color') === false) {
+                    $classes .= ' has-border-color';
+                }
+            }
+            return '<div' . $before . 'class="' . trim($classes) . '"' . $after . '>';
+        }, $html);
+
+        return $html;
+    }
+
     /**
      * Check if a URL is local/localhost
      *

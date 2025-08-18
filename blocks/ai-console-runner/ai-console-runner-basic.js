@@ -33,7 +33,8 @@
         var parse = wp.blocks.parse;
         var serialize = wp.blocks.serialize;
         var dispatch = wp.data.dispatch;
-        var select = wp.data.select;
+        var selectStore = wp.data.select;
+        var useSelect = wp.data.useSelect;
         
         registerBlockType('stepfox-ai/console-runner', {
             title: 'AI Console Runner',
@@ -68,14 +69,15 @@
                 var [statusMessage, setStatusMessage] = useState('');
                 var [showCode, setShowCode] = useState(true);
                 var clientId = props.clientId;
+                var innerBlocks = useSelect(function(s){
+                    return s('core/block-editor').getBlocks(clientId);
+                }, [clientId]);
                 
 
                 
                 // Helper function to handle successful code generation
                 function handleSuccessfulGeneration(data) {
                     if (data.success && data.code) {
-                        setAttributes({ codeContent: data.code });
-                        
                         var originalCode = data.code;
                         
                         // Check if it's WordPress block markup
@@ -83,16 +85,23 @@
                             // Parse the WordPress blocks
                             try {
                                 var parsedBlocks = parse(originalCode);
-                                
                                 if (parsedBlocks && parsedBlocks.length > 0) {
-                                    // Get the block editor store
-                                    var blockEditor = wp.data.dispatch('core/block-editor');
-                                    
-                                    // Replace innerBlocks of current block
-                                    blockEditor.replaceInnerBlocks(clientId, parsedBlocks);
-                                    
-                                    setStatusMessage('✅ WordPress blocks generated and added as innerBlocks! You can now edit them directly.');
-                                    setShowCode(false); // Hide code editor to show innerBlocks
+                                    // Round-trip to canonical and re-parse to keep data tree and HTML in sync
+                                    var canonicalCode = serialize(parsedBlocks);
+                                    var canonicalBlocks = parse(canonicalCode);
+                                    setAttributes({ codeContent: canonicalCode });
+                                    // Defer the heavy replaceInnerBlocks to avoid blocking the UI
+                                    var schedule = window.requestIdleCallback || function(cb){ return setTimeout(cb, 0); };
+                                    schedule(function(){
+                                        try {
+                                            wp.data.dispatch('core/block-editor').replaceInnerBlocks(clientId, canonicalBlocks);
+                                            setStatusMessage('✅ WordPress blocks generated and added as innerBlocks! You can now edit them directly.');
+                                            setShowCode(false);
+                                        } catch (e) {
+                                            console.error('replaceInnerBlocks failed:', e);
+                                            setStatusMessage('⚠️ Insert failed. See console for details.');
+                                        }
+                                    });
                                 } else {
                                     setStatusMessage('⚠️ WordPress blocks generated but could not be parsed. Check the code below.');
                                 }
@@ -102,10 +111,13 @@
                             }
                         } else if (originalCode.includes('<') && originalCode.includes('>')) {
                             setStatusMessage('✅ HTML code generated! You can copy it or convert to blocks.');
+                            setAttributes({ codeContent: originalCode });
                         } else if (originalCode.includes('console.log') || originalCode.includes('function') || originalCode.includes('var') || originalCode.includes('const') || originalCode.includes('let')) {
                             setStatusMessage('✅ JavaScript code generated! Click "Run in Console" to execute it.');
+                            setAttributes({ codeContent: originalCode });
                         } else {
                             setStatusMessage('✅ Code generated successfully!');
+                            setAttributes({ codeContent: originalCode });
                         }
                     } else {
                         var errorMsg = data.message || 'Failed to generate code';
@@ -169,7 +181,8 @@
                         },
                         body: JSON.stringify({
                             prompt: rawPrompt,
-                            images: attributes.promptImages
+                            images: attributes.promptImages,
+                            async: false
                         }),
                         signal: controller.signal
                     })
@@ -204,6 +217,7 @@
                                 }
                             }
                         } catch (_e) {}
+                        // Use synchronous response path for stability
                         handleSuccessfulGeneration(data);
                     })
                     .catch(function(err) {
@@ -472,7 +486,7 @@
                         )
                     ),
                     
-                    el('div', { style: { marginBottom: '10px' } },
+                    el('div', { style: { marginBottom: '10px', position: 'relative' } },
                         el(Button, {
                             isPrimary: true,
                             isBusy: isGenerating,
@@ -488,14 +502,14 @@
                         }, 'Run in Console'),
                         
                         // Show toggle button if we have innerBlocks
-                        select('core/block-editor').getBlocks(clientId).length > 0 && el(Button, {
+                        innerBlocks.length > 0 && el(Button, {
                             isSecondary: true,
                             onClick: toggleCodeView,
                             style: { marginRight: '10px' }
                         }, showCode ? 'Show Blocks' : 'Show Code'),
                         
                         // Clear innerBlocks button
-                        select('core/block-editor').getBlocks(clientId).length > 0 && el(Button, {
+                        innerBlocks.length > 0 && el(Button, {
                             isDestructive: true,
                             onClick: function() {
                                 if (confirm('Are you sure you want to clear all innerBlocks?')) {
@@ -506,6 +520,18 @@
                             },
                             style: { marginRight: '10px' }
                         }, 'Clear Blocks'),
+                        isGenerating && el('div', {
+                            style: {
+                                position: 'absolute',
+                                inset: 0,
+                                background: 'rgba(255,255,255,0.6)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                pointerEvents: 'none',
+                                zIndex: 1
+                            }
+                        }, el('span', { style: { fontSize: '12px', color: '#333' } }, 'Generating... Please wait, this may take a few minutes for complex requests.')),
                         
                         attributes.codeContent && el(Button, {
                             isSecondary: true,
@@ -561,8 +587,10 @@
                     
 
                     
-                    // Show either code editor or innerBlocks
-                    showCode ? el('div', {},
+                    // Always render InnerBlocks for validation, but toggle visibility via CSS
+                    el('div', {
+                        style: { display: showCode ? 'block' : 'none' }
+                    },
                         el('label', { 
                             style: { 
                                 display: 'block', 
@@ -587,8 +615,10 @@
                                 backgroundColor: '#f5f5f5'
                             }
                         })
-                    ) : el('div', {
+                    ),
+                    el('div', {
                         style: {
+                            display: showCode ? 'none' : 'block',
                             border: '1px solid #ddd',
                             borderRadius: '4px',
                             padding: '20px',
@@ -596,7 +626,7 @@
                             minHeight: '200px'
                         }
                     },
-                        select('core/block-editor').getBlocks(clientId).length > 0 
+                        innerBlocks.length > 0 
                             ? el(InnerBlocks, {})
                             : el('p', { style: { textAlign: 'center', color: '#666' } }, 'No blocks yet. Generate some WordPress blocks to see them here.')
                     ),
