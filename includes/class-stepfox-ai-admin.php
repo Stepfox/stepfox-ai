@@ -201,6 +201,28 @@ class StepFox_AI_Admin {
             'stepfox_ai_openai_section'
         );
 
+        // API mode selection (Auto / Chat Completions / Responses API)
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_api_mode',
+            array(
+                'type' => 'string',
+                'sanitize_callback' => function($val){
+                    $val = is_string($val) ? strtolower($val) : 'auto';
+                    return in_array($val, array('auto','chat','responses'), true) ? $val : 'auto';
+                },
+                'default' => 'auto',
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_api_mode',
+            __('API Mode', 'stepfox-ai'),
+            array($this, 'api_mode_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
+
         // Experimental: Enable images for GPT-5 models
         register_setting(
             'stepfox_ai_settings',
@@ -294,6 +316,23 @@ class StepFox_AI_Admin {
             <?php _e('Select the OpenAI model to use for code generation.', 'stepfox-ai'); ?><br>
             <strong><?php _e('Note:', 'stepfox-ai'); ?></strong> <?php _e('Only GPT-4 Vision, GPT-4o, and GPT-4o Mini can analyze image content (read text, describe what\'s in images). Other models can only use images for placement in WordPress blocks.', 'stepfox-ai'); ?><br>
             <strong><?php _e('GPT-5 Models:', 'stepfox-ai'); ?></strong> <?php _e('Available mappings: gpt-5-thinking → gpt-5, gpt-5-thinking-mini → gpt-5-mini, gpt-5-thinking-nano → gpt-5-nano, gpt-5-main → gpt-5-chat-latest.', 'stepfox-ai'); ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * API mode field callback
+     */
+    public function api_mode_field_callback() {
+        $mode = get_option('stepfox_ai_api_mode', 'auto');
+        ?>
+        <select id="stepfox_ai_api_mode" name="stepfox_ai_api_mode">
+            <option value="auto" <?php selected($mode, 'auto'); ?>><?php esc_html_e('Auto (recommended)', 'stepfox-ai'); ?></option>
+            <option value="chat" <?php selected($mode, 'chat'); ?>><?php esc_html_e('Chat Completions endpoint', 'stepfox-ai'); ?></option>
+            <option value="responses" <?php selected($mode, 'responses'); ?>><?php esc_html_e('Responses API endpoint', 'stepfox-ai'); ?></option>
+        </select>
+        <p class="description">
+            <?php echo wp_kses_post(__('Choose which OpenAI API to use. <strong>Auto</strong> uses Responses for GPT‑5 text models and Chat Completions otherwise. If you encounter empty responses with large images, try switching to <strong>Chat</strong>.', 'stepfox-ai')); ?>
         </p>
         <?php
     }

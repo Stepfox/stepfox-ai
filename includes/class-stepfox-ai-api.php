@@ -243,10 +243,8 @@ class StepFox_AI_API {
         }
 
         // Prepare the system prompt based on model capabilities
-        // Ensure variable is defined before use for logging
-        if (!isset($uses_responses_api)) { $uses_responses_api = false; }
-        // Log the model selected so frontend can see it in console
-        error_log('StepFox AI - Selected model: ' . $model . ' (will use ' . ($uses_responses_api ? 'Responses API' : 'Chat Completions') . ')');
+        // Log the model selected so frontend can see it in console (API selection is decided later)
+        error_log('StepFox AI - Selected model: ' . $model);
         // System prompt from settings (optional). If empty, we default to a minimal guardrail.
         $settings_system_prompt = trim((string) get_option('stepfox_ai_system_prompt', ''));
         if ($settings_system_prompt === '') {
@@ -321,15 +319,24 @@ class StepFox_AI_API {
             $system_prompt .= "\n\nWhen generating WordPress blocks, use the provided images in appropriate blocks like wp:image, wp:cover (with useFeaturedImage or url attribute), wp:media-text, etc. Use the exact URLs provided.";
         }
 
-        // Determine if this model should use the Responses API (GPT-5 text family)
+        // Determine API selection (Chat vs Responses)
         $gpt5_text_models = array('gpt-5', 'gpt-5-mini', 'gpt-5-nano');
-        $uses_responses_api = in_array($model, $gpt5_text_models);
-        // If GPT‑5 images are enabled and images are present, force Chat Completions (messages) instead of Responses API
-        $force_chat_for_images = ($gpt5_images_enabled && in_array($model, $gpt5_text_models, true) && !empty($images));
-        if ($force_chat_for_images) {
-            // Ensure both endpoint and body builder use Chat schema
+        $api_mode_pref = get_option('stepfox_ai_api_mode', 'auto');
+        if ($api_mode_pref === 'responses') {
+            $uses_responses_api = true;
+        } elseif ($api_mode_pref === 'chat') {
             $uses_responses_api = false;
+        } else { // auto
+            // Default: GPT‑5 text family uses Responses, others use Chat
+            $uses_responses_api = in_array($model, $gpt5_text_models, true);
+            // If images present for GPT‑5 and admin enabled vision with Responses, keep Responses
+            // Otherwise, prefer Chat for image payloads with GPT‑5
+            if (in_array($model, $gpt5_text_models, true) && !empty($images)) {
+                $uses_responses_api = $gpt5_images_enabled ? true : false;
+            }
         }
+
+        error_log('StepFox AI - API selected: ' . ($uses_responses_api ? 'Responses' : 'Chat') . ' (mode=' . $api_mode_pref . ', images=' . (is_array($images) ? count($images) : 0) . ', gpt5_images=' . ($gpt5_images_enabled ? '1' : '0') . ')');
 
         // Prepare the request body based on model type
         $has_images = !empty($images) && is_array($images);
@@ -345,9 +352,10 @@ class StepFox_AI_API {
                     $is_local = $this->is_local_url($image_url);
                     $final_url = $is_local ? $this->convert_local_image_to_base64($image_url) : $image_url;
                     if (!$final_url) { continue; }
+                    // Responses API expects image_url to be a string, not an object
                     $content[] = array(
                         'type' => 'input_image',
-                        'image_url' => array('url' => $final_url)
+                        'image_url' => $final_url
                     );
                 }
             }
@@ -374,6 +382,7 @@ class StepFox_AI_API {
                     $is_local = $this->is_local_url($image_url);
                     $final_url = $is_local ? $this->convert_local_image_to_base64($image_url) : $image_url;
                     if (!$final_url) { continue; }
+                    // For Chat Completions, image_url accepts either {url} or a base64 data URI string via {url}
                     $user_content[] = array('type' => 'image_url', 'image_url' => array('url' => $final_url, 'detail' => 'auto'));
                 }
                 $body = array(
