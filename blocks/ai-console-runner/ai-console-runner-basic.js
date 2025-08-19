@@ -162,6 +162,14 @@
                         console.log('API URL:', window.stepfoxAI.apiUrl);
                         console.log('Prompt length:', (rawPrompt || '').length);
                         console.log('Images count:', (attributes.promptImages || []).length);
+                        console.groupCollapsed('[StepFox AI] User prompt (full)');
+                        console.log(rawPrompt || '');
+                        console.groupEnd();
+                        if ((attributes.promptImages || []).length > 0) {
+                            console.groupCollapsed('[StepFox AI] Images payload');
+                            console.log(attributes.promptImages);
+                            console.groupEnd();
+                        }
                         // Ask backend which model will be used (it logs on server). Also print current selection if exposed.
                         if (window.stepfoxAI && window.stepfoxAI.model) {
                             console.log('Selected model (client):', window.stepfoxAI.model);
@@ -215,6 +223,14 @@
                                     console.log(data.prompt_preview);
                                     console.groupEnd();
                                 }
+                            }
+                            if (data && (data.system_prompt_full || data.user_prompt_sent)) {
+                                console.groupCollapsed('[StepFox AI] System prompt (full)');
+                                console.log(data.system_prompt_full || '');
+                                console.groupEnd();
+                                console.groupCollapsed('[StepFox AI] User prompt (sent)');
+                                console.log(data.user_prompt_sent || '');
+                                console.groupEnd();
                             }
                         } catch (_e) {}
                         // Use synchronous response path for stability

@@ -472,7 +472,7 @@ class StepFox_AI_Admin {
  
         $rest_base = rest_url('stepfox-ai/v1');
         $nonce = wp_create_nonce('wp_rest');
-        $table .= '<script>document.addEventListener("click",function(e){var b=e.target.closest(".cancel-job,.delete-job");if(!b)return;var job=b.getAttribute("data-job");var isDelete=b.classList.contains("delete-job");var endpoint=isDelete?"/job/delete":"/job/cancel";fetch(' . json_encode($rest_base) . '+endpoint,{method:"POST",headers:{"Content-Type":"application/json","X-WP-Nonce":' . json_encode($nonce) . '},body:JSON.stringify({job_id:job})}).then(function(r){return r.json().catch(function(){return {};});}).then(function(){location.reload();}).catch(function(err){alert("Request failed: "+err.message);});});</script>';
+        $table .= '<script>document.addEventListener("click",function(e){var b=e.target.closest(".cancel-job,.delete-job,.run-job");if(!b)return;var job=b.getAttribute("data-job");var endpoint="";if(b.classList.contains("delete-job")){endpoint="/job/delete";}else if(b.classList.contains("cancel-job")){endpoint="/job/cancel";}else{endpoint="/job/run";}fetch(' . json_encode($rest_base) . '+endpoint,{method:"POST",headers:{"Content-Type":"application/json","X-WP-Nonce":' . json_encode($nonce) . '},body:JSON.stringify({job_id:job})}).then(function(r){return r.json().catch(function(){return {};});}).then(function(){location.reload();}).catch(function(err){alert("Request failed: "+err.message);});});</script>';
         return $table;
     }
 }

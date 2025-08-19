@@ -118,6 +118,19 @@ class StepFox_AI_API {
             ),
         ));
 
+        // Run job immediately (fallback for environments without loopback/cron)
+        register_rest_route('stepfox-ai/v1', '/job/run', array(
+            'methods' => 'POST',
+            'callback' => array($this, 'run_job_rest'),
+            'permission_callback' => array($this, 'check_permission'),
+            'args' => array(
+                'job_id' => array(
+                    'required' => true,
+                    'type' => 'string'
+                ),
+            ),
+        ));
+
         // Register background processor via AJAX for non-blocking execution
         add_action('wp_ajax_stepfox_ai_process_job', array($this, 'process_job'));
         add_action('wp_ajax_nopriv_stepfox_ai_process_job', array($this, 'process_job'));
@@ -259,12 +272,16 @@ class StepFox_AI_API {
         
         // Add vision-specific instructions for vision-capable models
         if (in_array($model, $vision_models) && !empty($images)) {
-            $base_prompt = 'You are an expert JavaScript, HTML, and WordPress block editor programmer with image analysis capabilities. ' .
-                'You can see and analyze the content of images provided. ' .
-                'Write only the raw code for the following request. ' .
-                'Do not include any explanation, markdown formatting (like ```js or ```html), or any text other than the code itself. ' .
-                'Your entire response should be executable in a browser or valid WordPress block markup. ' .
-                'When asked to extract text or describe image content, create appropriate WordPress blocks with that content.';
+            $vision_addendum = 'You can analyze provided images. Return only valid WordPress block markup (no prose). ' .
+                'When extracting text or describing images, create appropriate blocks (paragraph/heading/list/etc.). ' .
+                'If an image should be placed, use wp:image or wp:cover and include the given URL.';
+            if ($settings_system_prompt === '') {
+                // No custom prompt: use a concise default geared for vision
+                $base_prompt = 'You are an expert JavaScript, HTML, and WordPress block editor developer with image analysis capabilities. ' . $vision_addendum;
+            } else {
+                // Append vision guidance to the saved system prompt (do not overwrite)
+                $base_prompt = $settings_system_prompt . "\n\n" . $vision_addendum;
+            }
         }
         
         // The effective system prompt is whatever is saved in settings; we append the user prompt below.
@@ -560,6 +577,9 @@ class StepFox_AI_API {
             'api' => $uses_responses_api ? 'responses' : 'chat',
             'prompt_length' => $system_prompt_length,
             'prompt_preview' => $system_prompt_preview,
+            // Debug fields for editor console logging
+            'system_prompt_full' => $system_prompt,
+            'user_prompt_sent' => (string) $prompt,
         ), 200);
     }
 
@@ -615,6 +635,18 @@ class StepFox_AI_API {
         ), 15 * MINUTE_IN_SECONDS);
         error_log('StepFox AI - Job finished: ' . $job_id . ' | success=' . (isset($data['success']) ? var_export($data['success'], true) : 'n/a'));
         delete_transient('stepfox_ai_payload_' . $job_id);
+    }
+
+    /**
+     * REST wrapper to run a queued job immediately (manual trigger)
+     */
+    public function run_job_rest($request) {
+        $job_id = sanitize_text_field($request->get_param('job_id'));
+        if (empty($job_id)) {
+            return new WP_REST_Response(array('success'=>false,'message'=>'Missing job_id'), 400);
+        }
+        $this->run_job($job_id);
+        return new WP_REST_Response(array('success'=>true), 200);
     }
 
     /**
