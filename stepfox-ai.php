@@ -15,7 +15,7 @@ if (!defined('ABSPATH')) {
 
 // Define plugin constants
 if (!defined('STEPFOX_AI_VERSION')) {
-    define('STEPFOX_AI_VERSION', '1.0.0');
+    define('STEPFOX_AI_VERSION', '1.0.1');
 }
 if (!defined('STEPFOX_AI_PLUGIN_FILE')) {
     define('STEPFOX_AI_PLUGIN_FILE', __FILE__);
