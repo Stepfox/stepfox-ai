@@ -48,3 +48,13 @@ function stepfox_ai_init_plugin() {
 add_action('plugins_loaded', 'stepfox_ai_init_plugin');
 
 
+// Add "Check for updates" link on the plugin row
+add_filter('plugin_action_links_' . plugin_basename(__FILE__), function($links){
+    if (current_user_can('update_plugins')) {
+        $url = network_admin_url('update-core.php?force-check=1');
+        $links[] = '<a href="' . esc_url($url) . '">' . esc_html__('Check for updates', 'stepfox-ai') . '</a>';
+    }
+    return $links;
+});
+
+

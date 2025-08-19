@@ -162,20 +162,37 @@ if (!class_exists('Stepfox_AI_Updater')) {
 				return $cached;
 			}
 
-			$candidates = [
-				'https://raw.githubusercontent.com/' . self::REPO_OWNER . '/' . self::REPO_NAME . '/' . self::BRANCH . '/stepfox-ai.php',
-				'https://raw.githubusercontent.com/' . self::REPO_OWNER . '/' . self::REPO_NAME . '/' . self::BRANCH . '/stepfox-ai/stepfox-ai.php',
-			];
+			// Backoff if repo is not reachable (404/private)
+			if (get_site_transient('stepfox_ai_repo_not_found')) {
+				return null;
+			}
+
+			$branches_to_try = array_unique(array_filter([
+				self::BRANCH,
+				self::get_repo_default_branch(),
+				'master',
+			]));
+
 			$body = null;
-			foreach ($candidates as $raw_url) {
-				$response = wp_remote_get($raw_url, [
-					'timeout'    => 10,
-					'user-agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url('/'),
-				]);
-				if (is_wp_error($response)) { continue; }
-				if (wp_remote_retrieve_response_code($response) !== 200) { continue; }
-				$tmp = wp_remote_retrieve_body($response);
-				if (is_string($tmp) && $tmp !== '') { $body = $tmp; break; }
+			foreach ($branches_to_try as $branch) {
+				$candidates = [
+					'https://raw.githubusercontent.com/' . self::REPO_OWNER . '/' . self::REPO_NAME . '/' . $branch . '/stepfox-ai.php',
+					'https://raw.githubusercontent.com/' . self::REPO_OWNER . '/' . self::REPO_NAME . '/' . $branch . '/stepfox-ai/stepfox-ai.php',
+				];
+				$discovered_path = self::discover_plugin_main_path($branch);
+				if ($discovered_path) {
+					$candidates[] = 'https://raw.githubusercontent.com/' . self::REPO_OWNER . '/' . self::REPO_NAME . '/' . $branch . '/' . ltrim($discovered_path, '/');
+				}
+
+				foreach ($candidates as $raw_url) {
+					$response = self::http_get($raw_url);
+					if (is_wp_error($response)) { continue; }
+					$code = wp_remote_retrieve_response_code($response);
+					if ($code === 404) { set_site_transient('stepfox_ai_repo_not_found', 1, HOUR_IN_SECONDS); return null; }
+					if ($code !== 200) { continue; }
+					$tmp = wp_remote_retrieve_body($response);
+					if (is_string($tmp) && $tmp !== '') { $body = $tmp; break 2; }
+				}
 			}
 			if (!is_string($body) || $body === '') { return null; }
 			if (preg_match('/^\s*\*\s*Version:\s*([^\r\n]+)/mi', $body, $m)) {
@@ -187,6 +204,65 @@ if (!class_exists('Stepfox_AI_Updater')) {
 			}
 			if ($version) { set_site_transient($cache_key, $version, 5 * MINUTE_IN_SECONDS); }
 			return $version;
+		}
+
+		/**
+		 * Discover default branch from GitHub API
+		 */
+		private static function get_repo_default_branch() {
+			$cache_key = 'stepfox_ai_repo_default_branch';
+			$cached = get_site_transient($cache_key);
+			if (is_string($cached) && $cached !== '') { return $cached; }
+			$url = 'https://api.github.com/repos/' . self::REPO_OWNER . '/' . self::REPO_NAME;
+			$response = self::http_get($url);
+			$code = is_wp_error($response) ? 0 : wp_remote_retrieve_response_code($response);
+			if ($code === 404) { set_site_transient('stepfox_ai_repo_not_found', 1, HOUR_IN_SECONDS); return null; }
+			if (!is_wp_error($response) && $code === 200) {
+				$data = json_decode(wp_remote_retrieve_body($response), true);
+				if (is_array($data) && isset($data['default_branch']) && is_string($data['default_branch'])) {
+					set_site_transient($cache_key, $data['default_branch'], 30 * MINUTE_IN_SECONDS);
+					return $data['default_branch'];
+				}
+			}
+			return null;
+		}
+
+		/**
+		 * Discover plugin main file path via GitHub Trees API
+		 */
+		private static function discover_plugin_main_path($branch) {
+			$cache_key = 'stepfox_ai_plugin_main_path_' . sanitize_title($branch);
+			$cached = get_site_transient($cache_key);
+			if (is_string($cached) && $cached !== '') { return $cached; }
+			$url = 'https://api.github.com/repos/' . self::REPO_OWNER . '/' . self::REPO_NAME . '/git/trees/' . rawurlencode($branch) . '?recursive=1';
+			$response = self::http_get($url);
+			$code = is_wp_error($response) ? 0 : wp_remote_retrieve_response_code($response);
+			if ($code === 404) { set_site_transient('stepfox_ai_repo_not_found', 1, HOUR_IN_SECONDS); return null; }
+			if (!is_wp_error($response) && $code === 200) {
+				$data = json_decode(wp_remote_retrieve_body($response), true);
+				if (isset($data['tree']) && is_array($data['tree'])) {
+					foreach ($data['tree'] as $node) {
+						if (isset($node['path']) && is_string($node['path']) && preg_match('/(^|\/)stepfox-ai\.php$/i', $node['path'])) {
+							set_site_transient($cache_key, $node['path'], 30 * MINUTE_IN_SECONDS);
+							return $node['path'];
+						}
+					}
+				}
+			}
+			return null;
+		}
+
+		/**
+		 * HTTP GET with optional GitHub token support and UA
+		 */
+		private static function http_get($url) {
+			$headers = [ 'user-agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url('/') ];
+			$token = defined('STEPFOX_AI_GITHUB_TOKEN') && STEPFOX_AI_GITHUB_TOKEN ? STEPFOX_AI_GITHUB_TOKEN : (defined('STEPFOX_GITHUB_TOKEN') ? STEPFOX_GITHUB_TOKEN : '');
+			if ($token) {
+				$headers['authorization'] = 'token ' . $token;
+				$headers['accept'] = 'application/vnd.github+json';
+			}
+			return wp_remote_get($url, [ 'timeout' => 10, 'headers' => $headers ]);
 		}
 
 		private static function read_local_version($plugin_file) {
@@ -210,7 +286,16 @@ if (!class_exists('Stepfox_AI_Updater')) {
 		}
 
 		public static function maybe_bust_cache() {
-			if (self::is_force_check()) { delete_site_transient('stepfox_ai_remote_version'); }
+			if (self::is_force_check()) {
+				delete_site_transient('stepfox_ai_remote_version');
+				delete_site_transient('stepfox_ai_repo_default_branch');
+				delete_site_transient('stepfox_ai_repo_not_found');
+				// Clear common cached path keys
+				$branches = array_unique(array_filter([ self::BRANCH, self::get_repo_default_branch(), 'master' ]));
+				foreach ($branches as $b) {
+					delete_site_transient('stepfox_ai_plugin_main_path_' . sanitize_title($b));
+				}
+			}
 		}
 		private static function is_force_check() {
 			return (is_admin() && isset($_GET['force-check'])) || (defined('WP_CLI') && WP_CLI);
