@@ -177,9 +177,10 @@
                         console.groupEnd();
                     } catch (_e) {}
                     var controller = new AbortController();
+                    var timeoutMs = 600000; // 10 minutes
                     var timeoutId = setTimeout(function() {
                         controller.abort();
-                    }, 300000); // 5 minutes timeout
+                    }, timeoutMs);
                     
                     fetch(window.stepfoxAI.apiUrl, {
                         method: 'POST',
@@ -247,8 +248,8 @@
                         
                         // Check if it was a timeout error
                         if (err.name === 'AbortError') {
-                            setStatusMessage('Request timed out after 5 minutes. Try a simpler prompt or break it into smaller parts.');
-                            setAttributes({ codeContent: '// Error: Request timed out. The prompt may be too complex. Try simplifying it.' });
+                            setStatusMessage('Request timed out after 10 minutes. Try a simpler prompt or break it into smaller parts.');
+                            setAttributes({ codeContent: '// Error: Request timed out (10 minutes). The prompt may be too complex. Try simplifying it.' });
                             setIsGenerating(false);
                             return;
                         }
@@ -284,7 +285,7 @@
                             var fallbackController = new AbortController();
                             var fallbackTimeoutId = setTimeout(function() {
                                 fallbackController.abort();
-                            }, 300000); // 5 minutes timeout for fallback too
+                            }, timeoutMs);
                             
                             fetch(window.stepfoxAI.ajaxUrl, {
                                 method: 'POST',
@@ -308,8 +309,8 @@
                                 console.error('Fallback error:', fallbackErr);
                                 
                                 if (fallbackErr.name === 'AbortError') {
-                                    setStatusMessage('Request timed out after 5 minutes. Try a simpler prompt.');
-                                    setAttributes({ codeContent: '// Error: Request timed out (5 minutes). The prompt may be too complex.' });
+                                    setStatusMessage('Request timed out after 10 minutes. Try a simpler prompt.');
+                                    setAttributes({ codeContent: '// Error: Request timed out (10 minutes). The prompt may be too complex.' });
                                 } else {
                                     setStatusMessage('Error: ' + err.message);
                                     setAttributes({ codeContent: '// Error: ' + err.message + '\n// Fallback error: ' + fallbackErr.message });

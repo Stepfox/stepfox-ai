@@ -179,8 +179,8 @@ class StepFox_AI_API {
      */
     public function handle_generate_request($request) {
         // Extend PHP execution time for long-running AI requests
-        @set_time_limit(300); // 5 minutes
-        @ini_set('max_execution_time', 300);
+        @set_time_limit(6000); // 100 minutes
+        @ini_set('max_execution_time', 6000);
         
         $prompt = $request->get_param('prompt');
         $images = $request->get_param('images');
@@ -406,7 +406,7 @@ class StepFox_AI_API {
                 'Authorization' => 'Bearer ' . $api_key,
             ),
             'body' => json_encode($body),
-            'timeout' => 300, // 5 minutes timeout for complex requests
+            'timeout' => 6000, // allow long generations
             'blocking' => true,
         ));
 
@@ -490,60 +490,62 @@ class StepFox_AI_API {
             $generated_code = trim($generated_code);
         }
 
-        // If the model returned an empty string, try a reliable fallback pathway via chat model
+        // If the model returned an empty string, attempt limited retries with the same model
         if ($generated_code === '') {
-            error_log('StepFox AI - Empty generation received from model ' . $model . ' — attempting fallback to chat model.');
-            // Build chat completion fallback with GPT‑5 chat; if that fails, try GPT‑4o
-            $fallback_models = array('gpt-5-chat-latest', 'gpt-4o');
-            foreach ($fallback_models as $fb_model) {
-                $fb_max_tokens_param = $this->get_max_tokens_parameter($fb_model);
-                $fb_body = array(
-                    'model' => $fb_model,
-                    'messages' => array(
-                        array('role' => 'system', 'content' => $system_prompt),
-                        array('role' => 'user', 'content' => $prompt),
-                    ),
-                    $fb_max_tokens_param => 6000,
-                );
-                if (!$this->is_temperature_restricted_model($fb_model)) {
-                    $fb_body['temperature'] = 0.7;
-                }
-
-                $fb_response = wp_remote_post($this->openai_api_url, array(
+            for ($attempt = 1; $attempt <= 2 && $generated_code === ''; $attempt++) {
+                error_log('StepFox AI - Empty generation; retry attempt ' . $attempt . ' with model ' . $model);
+                $retry_response = wp_remote_post($target_url, array(
                     'headers' => array(
                         'Content-Type' => 'application/json',
                         'Authorization' => 'Bearer ' . $api_key,
                     ),
-                    'body' => json_encode($fb_body),
-                    'timeout' => 300,
+                    'body' => json_encode($body),
+                    'timeout' => 6000,
+                    'blocking' => true,
                 ));
-                if (!is_wp_error($fb_response)) {
-                    $fb_code = wp_remote_retrieve_response_code($fb_response);
-                    $fb_body_raw = wp_remote_retrieve_body($fb_response);
-                    $fb_data = json_decode($fb_body_raw, true);
-                    if ($fb_code === 200 && isset($fb_data['choices'][0]['message']['content'])) {
-                        $generated_code = trim(preg_replace('/^```(javascript|js|html)?\n|```$/m', '', $fb_data['choices'][0]['message']['content']));
-                        if ($generated_code !== '') {
-                            error_log('StepFox AI - Fallback via ' . $fb_model . ' succeeded.');
-                            $model_used = $fb_model;
-                            break;
+                if (!is_wp_error($retry_response)) {
+                    $retry_code = wp_remote_retrieve_response_code($retry_response);
+                    $retry_body = wp_remote_retrieve_body($retry_response);
+                    $retry_data = json_decode($retry_body, true);
+                    if ($retry_code === 200) {
+                        if ($uses_responses_api) {
+                            if (!empty($retry_data['output_text']) && is_string($retry_data['output_text'])) {
+                                $generated_code = $retry_data['output_text'];
+                            } elseif (!empty($retry_data['output']) && is_array($retry_data['output'])) {
+                                foreach ($retry_data['output'] as $out) {
+                                    if (isset($out['content']) && is_array($out['content'])) {
+                                        foreach ($out['content'] as $contentItem) {
+                                            if (isset($contentItem['type']) && $contentItem['type'] === 'output_text' && isset($contentItem['text'])) {
+                                                $generated_code = $contentItem['text'];
+                                                break 2;
+                                            }
+                                            if (isset($contentItem['text'])) {
+                                                $generated_code = $contentItem['text'];
+                                                break 2;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (isset($retry_data['choices'][0]['message']['content'])) {
+                            $generated_code = trim(preg_replace('/^```(javascript|js|html)?\n|```$/m', '', $retry_data['choices'][0]['message']['content']));
                         }
                     }
                 }
             }
+        }
 
-            if ($generated_code === '') {
-                // Still empty — surface helpful error and include snapshot
-                $snapshot = substr(json_encode($response_data), 0, 2000);
-                error_log('StepFox AI - All fallbacks failed. Response snapshot: ' . $snapshot);
-                return new WP_REST_Response(array(
-                    'success' => false,
-                    'message' => __('Model returned an empty response. Try refining the prompt or switching models.', 'stepfox-ai'),
-                    'raw' => $response_data,
-                    'prompt_length' => $system_prompt_length,
-                    'prompt_preview' => $system_prompt_preview,
-                ), 200);
-            }
+        // If still empty after retries, do not fallback to another model
+        if ($generated_code === '') {
+            $snapshot = substr(json_encode($response_data), 0, 2000);
+            error_log('StepFox AI - Empty generation received from model ' . $model . ' (no fallback). Snapshot: ' . $snapshot);
+            return new WP_REST_Response(array(
+                'success' => false,
+                'message' => __('Model returned an empty response.', 'stepfox-ai'),
+                'raw' => $response_data,
+                'prompt_length' => $system_prompt_length,
+                'prompt_preview' => $system_prompt_preview,
+            ), 200);
         }
 
         // First, normalize inline styles to match Gutenberg save output (expand shorthands, strip invalid values).
