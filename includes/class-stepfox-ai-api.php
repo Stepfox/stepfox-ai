@@ -243,6 +243,8 @@ class StepFox_AI_API {
         }
 
         // Prepare the system prompt based on model capabilities
+        // Ensure variable is defined before use for logging
+        if (!isset($uses_responses_api)) { $uses_responses_api = false; }
         // Log the model selected so frontend can see it in console
         error_log('StepFox AI - Selected model: ' . $model . ' (will use ' . ($uses_responses_api ? 'Responses API' : 'Chat Completions') . ')');
         // System prompt from settings (optional). If empty, we default to a minimal guardrail.
@@ -355,7 +357,7 @@ class StepFox_AI_API {
                     array('role' => 'user', 'content' => $content)
                 ),
                 'text' => array('format' => array('type' => 'text')),
-                'max_output_tokens' => 12000,
+                'max_output_tokens' => 20000,
             );
             if (!$this->is_temperature_restricted_model($model)) {
                 $body['temperature'] = 0.7;
@@ -377,7 +379,7 @@ class StepFox_AI_API {
                 $body = array(
                     'model' => $model,
                     'messages' => array(array('role' => 'user', 'content' => $user_content)),
-                    $max_tokens_param => 8000,
+                    $max_tokens_param => 16000,
                 );
             } else {
                 $body = array(
@@ -386,7 +388,7 @@ class StepFox_AI_API {
                         array('role' => 'system', 'content' => $system_prompt),
                         array('role' => 'user', 'content' => $prompt)
                     ),
-                    $max_tokens_param => 8000,
+                    $max_tokens_param => 16000,
                 );
             }
             if (!$this->is_temperature_restricted_model($model)) {
@@ -541,11 +543,9 @@ class StepFox_AI_API {
             error_log('StepFox AI - Empty generation received from model ' . $model . ' (no fallback). Snapshot: ' . $snapshot);
             return new WP_REST_Response(array(
                 'success' => false,
-                'message' => __('Model returned an empty response.', 'stepfox-ai'),
-                'raw' => $response_data,
-                'prompt_length' => $system_prompt_length,
-                'prompt_preview' => $system_prompt_preview,
-            ), 200);
+                'error' => __('The model returned an empty response. Try a shorter prompt, fewer/smaller images, or switch to a lighter model. You can also retry in a few seconds.', 'stepfox-ai'),
+                'snapshot' => $snapshot,
+            ), 502);
         }
 
         // First, normalize inline styles to match Gutenberg save output (expand shorthands, strip invalid values).
