@@ -111,8 +111,7 @@
                 'gpt-4o-mini': 'Faster, cost-effective multimodal model',
                 'gpt-5': 'Complex reasoning, code-heavy and multi-step tasks',
                 'gpt-5-mini': 'Cost-optimized reasoning, balances speed and capability',
-                'gpt-5-nano': 'High-throughput, simple instruction-following tasks',
-                'gpt-5-chat-latest': 'Latest GPT-5 chat model'
+                'gpt-5-nano': 'High-throughput, simple instruction-following tasks'
             };
             
             var selectedModel = $(this).val();

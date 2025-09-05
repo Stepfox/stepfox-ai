@@ -260,6 +260,152 @@ class StepFox_AI_Admin {
             'stepfox-ai-settings',
             'stepfox_ai_openai_section'
         );
+
+        // Max tokens
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_max_tokens',
+            array(
+                'type' => 'integer',
+                'sanitize_callback' => function($val){
+                    $n = intval($val);
+                    if ($n < 1) { $n = 1; }
+                    if ($n > 200000) { $n = 200000; }
+                    return $n;
+                },
+                'default' => 16000,
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_max_tokens',
+            __('Max tokens', 'stepfox-ai'),
+            array($this, 'max_tokens_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
+
+        // Temperature
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_temperature',
+            array(
+                'type' => 'number',
+                'sanitize_callback' => function($val){
+                    $f = floatval($val);
+                    if ($f < 0) { $f = 0.0; }
+                    if ($f > 2) { $f = 2.0; }
+                    return $f;
+                },
+                'default' => 0.7,
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_temperature',
+            __('Temperature', 'stepfox-ai'),
+            array($this, 'temperature_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
+
+        // Top P (nucleus sampling)
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_top_p',
+            array(
+                'type' => 'number',
+                'sanitize_callback' => function($val){
+                    $f = floatval($val);
+                    if ($f < 0) { $f = 0.0; }
+                    if ($f > 1) { $f = 1.0; }
+                    return $f;
+                },
+                'default' => 1.0,
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_top_p',
+            __('Top P', 'stepfox-ai'),
+            array($this, 'top_p_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
+
+        // Presence penalty
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_presence_penalty',
+            array(
+                'type' => 'number',
+                'sanitize_callback' => function($val){
+                    $f = floatval($val);
+                    if ($f < -2) { $f = -2.0; }
+                    if ($f > 2) { $f = 2.0; }
+                    return $f;
+                },
+                'default' => 0.0,
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_presence_penalty',
+            __('Presence penalty', 'stepfox-ai'),
+            array($this, 'presence_penalty_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
+
+        // Frequency penalty
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_frequency_penalty',
+            array(
+                'type' => 'number',
+                'sanitize_callback' => function($val){
+                    $f = floatval($val);
+                    if ($f < -2) { $f = -2.0; }
+                    if ($f > 2) { $f = 2.0; }
+                    return $f;
+                },
+                'default' => 0.0,
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_frequency_penalty',
+            __('Frequency penalty', 'stepfox-ai'),
+            array($this, 'frequency_penalty_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
+
+        // Stop sequences
+        register_setting(
+            'stepfox_ai_settings',
+            'stepfox_ai_stop_sequences',
+            array(
+                'type' => 'string',
+                'sanitize_callback' => function($val){
+                    // store as comma-separated string
+                    $val = is_string($val) ? $val : '';
+                    $parts = array_filter(array_map('trim', explode(',', $val)), 'strlen');
+                    // limit to 4 stop sequences as per API
+                    $parts = array_slice($parts, 0, 4);
+                    return implode(', ', $parts);
+                },
+                'default' => '',
+            )
+        );
+
+        add_settings_field(
+            'stepfox_ai_stop_sequences',
+            __('Stop sequences', 'stepfox-ai'),
+            array($this, 'stop_sequences_field_callback'),
+            'stepfox-ai-settings',
+            'stepfox_ai_openai_section'
+        );
     }
 
     /**
@@ -309,13 +455,11 @@ class StepFox_AI_Admin {
                 <option value="gpt-5" <?php selected($model, 'gpt-5'); ?>>GPT-5 (Complex reasoning, multi-step tasks)</option>
                 <option value="gpt-5-mini" <?php selected($model, 'gpt-5-mini'); ?>>GPT-5 Mini (Cost-optimized reasoning)</option>
                 <option value="gpt-5-nano" <?php selected($model, 'gpt-5-nano'); ?>>GPT-5 Nano (High-throughput, simple tasks)</option>
-                <option value="gpt-5-chat-latest" <?php selected($model, 'gpt-5-chat-latest'); ?>>GPT-5 Chat Latest</option>
             </optgroup>
         </select>
         <p class="description">
             <?php _e('Select the OpenAI model to use for code generation.', 'stepfox-ai'); ?><br>
-            <strong><?php _e('Note:', 'stepfox-ai'); ?></strong> <?php _e('Only GPT-4 Vision, GPT-4o, and GPT-4o Mini can analyze image content (read text, describe what\'s in images). Other models can only use images for placement in WordPress blocks.', 'stepfox-ai'); ?><br>
-            <strong><?php _e('GPT-5 Models:', 'stepfox-ai'); ?></strong> <?php _e('Available mappings: gpt-5-thinking → gpt-5, gpt-5-thinking-mini → gpt-5-mini, gpt-5-thinking-nano → gpt-5-nano, gpt-5-main → gpt-5-chat-latest.', 'stepfox-ai'); ?>
+            <strong><?php _e('Note:', 'stepfox-ai'); ?></strong> <?php _e('Only GPT-4 Vision, GPT-4o, and GPT-4o Mini can analyze image content (read text, describe what\'s in images). Other models can only use images for placement in WordPress blocks.', 'stepfox-ai'); ?>
         </p>
         <?php
     }
@@ -361,6 +505,84 @@ class StepFox_AI_Admin {
             <?php _e('Allow sending images to GPT‑5 models via Responses API (may be unstable/unsupported).', 'stepfox-ai'); ?>
         </label>
         <p class="description"><?php _e('When enabled, image URLs or base64 data will be included for GPT‑5 requests. Use only if your GPT‑5 tier supports vision.', 'stepfox-ai'); ?></p>
+        <?php
+    }
+
+    /**
+     * Max tokens field callback
+     */
+    public function max_tokens_field_callback() {
+        $value = intval(get_option('stepfox_ai_max_tokens', 16000));
+        ?>
+        <input type="number" id="stepfox_ai_max_tokens" name="stepfox_ai_max_tokens" value="<?php echo esc_attr($value); ?>" min="1" max="200000" step="1" class="small-text" />
+        <p class="description">
+            <?php echo wp_kses_post(__('Upper bound on the model\'s reply length in tokens. Called <em>max_completion_tokens</em> for GPT‑4o/GPT‑5 Chat, and <em>max_output_tokens</em> for the Responses API. Lower values keep outputs concise; higher values allow longer results.', 'stepfox-ai')); ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * Temperature field callback
+     */
+    public function temperature_field_callback() {
+        $value = floatval(get_option('stepfox_ai_temperature', 0.7));
+        ?>
+        <input type="number" id="stepfox_ai_temperature" name="stepfox_ai_temperature" value="<?php echo esc_attr($value); ?>" min="0" max="2" step="0.1" class="small-text" />
+        <p class="description">
+            <?php echo wp_kses_post(__('Controls randomness/creativity. 0 = deterministic, 2 = very creative. <strong>Note:</strong> Some models (e.g. GPT‑4o, GPT‑5 family) ignore custom values and use their default temperature.', 'stepfox-ai')); ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * Top P field callback
+     */
+    public function top_p_field_callback() {
+        $value = floatval(get_option('stepfox_ai_top_p', 1.0));
+        ?>
+        <input type="number" id="stepfox_ai_top_p" name="stepfox_ai_top_p" value="<?php echo esc_attr($value); ?>" min="0" max="1" step="0.05" class="small-text" />
+        <p class="description">
+            <?php echo wp_kses_post(__('Nucleus sampling. Consider only tokens comprising this cumulative probability mass. Use as an alternative to temperature; leave at 1.0 to disable. Applies to Chat Completions requests.', 'stepfox-ai')); ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * Presence penalty field callback
+     */
+    public function presence_penalty_field_callback() {
+        $value = floatval(get_option('stepfox_ai_presence_penalty', 0.0));
+        ?>
+        <input type="number" id="stepfox_ai_presence_penalty" name="stepfox_ai_presence_penalty" value="<?php echo esc_attr($value); ?>" min="-2" max="2" step="0.1" class="small-text" />
+        <p class="description">
+            <?php echo wp_kses_post(__('Encourages the model to talk about new topics (reduces staying on the same subject). Range −2 to 2. Applies to Chat Completions requests.', 'stepfox-ai')); ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * Frequency penalty field callback
+     */
+    public function frequency_penalty_field_callback() {
+        $value = floatval(get_option('stepfox_ai_frequency_penalty', 0.0));
+        ?>
+        <input type="number" id="stepfox_ai_frequency_penalty" name="stepfox_ai_frequency_penalty" value="<?php echo esc_attr($value); ?>" min="-2" max="2" step="0.1" class="small-text" />
+        <p class="description">
+            <?php echo wp_kses_post(__('Reduces repetition of the same tokens. Range −2 to 2. Applies to Chat Completions requests.', 'stepfox-ai')); ?>
+        </p>
+        <?php
+    }
+
+    /**
+     * Stop sequences field callback
+     */
+    public function stop_sequences_field_callback() {
+        $value = trim((string) get_option('stepfox_ai_stop_sequences', ''));
+        ?>
+        <input type="text" id="stepfox_ai_stop_sequences" name="stepfox_ai_stop_sequences" value="<?php echo esc_attr($value); ?>" class="regular-text" placeholder="e.g. </script>, END, <!-- stop -->" />
+        <p class="description">
+            <?php echo wp_kses_post(__('Comma‑separated list of up to 4 sequences where generation should stop (for example a closing tag). Applies to Chat Completions requests.', 'stepfox-ai')); ?>
+        </p>
         <?php
     }
 
@@ -413,7 +635,7 @@ class StepFox_AI_Admin {
 
         // Determine the correct max tokens parameter for the model
         $max_tokens_param = 'max_tokens'; // default
-        $new_parameter_models = array('gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4-turbo-preview', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-chat-latest');
+        $new_parameter_models = array('gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4-turbo-preview', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano');
         if (in_array($model, $new_parameter_models)) {
             $max_tokens_param = 'max_completion_tokens';
         }

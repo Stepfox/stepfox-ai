@@ -1,0 +1,198 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Three.js Realistic Fire (Shader)</title>
+  <style>
+    html, body { height:100%; margin:0; background:#000; }
+    #c { display:block; width:100%; height:100%; }
+  </style>
+  <!-- Runner auto-loads THREE when used inside the Stepfox Three.js block. For this standalone page, load from CDN. -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.min.js"></script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function(){
+  // Renderer
+  var canvas = document.getElementById('c');
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x000000, 1);
+
+  // Fullscreen orthographic camera
+  var scene = new THREE.Scene();
+  var camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  // Plane with shader
+  var geo = new THREE.PlaneGeometry(2, 2, 1, 1);
+  var uniforms = {
+    u_time: { value: 0 },
+    u_aspect: { value: 1 },
+    u_intensity: { value: 1.0 }
+  };
+
+  var vert = `
+    varying vec2 vUv;
+    void main(){
+      vUv = uv;
+      gl_Position = vec4(position, 1.0);
+    }
+  `;
+
+  // 2D value noise + fbm, domain-warped, shaped into a flame and color-mapped
+  var frag = `
+    precision highp float;
+    varying vec2 vUv;
+    uniform float u_time;
+    uniform float u_aspect;
+    uniform float u_intensity;
+
+    // Hash and noise helpers
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+    float noise(vec2 p){
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      float a = hash(i);
+      float b = hash(i + vec2(1.0, 0.0));
+      float c = hash(i + vec2(0.0, 1.0));
+      float d = hash(i + vec2(1.0, 1.0));
+      vec2 u = f*f*(3.0-2.0*f);
+      return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    }
+    float fbm(vec2 p){
+      float v = 0.0;
+      float a = 0.5;
+      for (int i=0;i<5;i++){
+        v += a * noise(p);
+        p = p * 2.0 + vec2(100.0);
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    vec3 fireGradient(float x){
+      // Smooth color ramp: deep red -> orange -> yellow -> white
+      x = clamp(x, 0.0, 1.0);
+      vec3 c1 = vec3(0.05, 0.0, 0.0);
+      vec3 c2 = vec3(0.8, 0.05, 0.0);
+      vec3 c3 = vec3(1.0, 0.5, 0.0);
+      vec3 c4 = vec3(1.0, 0.9, 0.4);
+      vec3 c5 = vec3(1.0);
+      vec3 col = mix(c1, c2, smoothstep(0.0, 0.25, x));
+      col = mix(col, c3, smoothstep(0.2, 0.55, x));
+      col = mix(col, c4, smoothstep(0.5, 0.8, x));
+      col = mix(col, c5, smoothstep(0.8, 1.0, x));
+      return col;
+    }
+
+    void main(){
+      // Aspect-corrected centered coords
+      vec2 uv = vUv;              // 0..1
+      vec2 p = uv - 0.5;          // -0.5..0.5
+      p.x *= u_aspect;
+
+      // Time & upward flow
+      float t = u_time * 0.32;
+      float up = -1.5 * t;
+
+      // FLAME SHAPE MASK --------------------------------------------------
+      // Tapered column: width decreases towards the top with a soft tip
+      float y = clamp(uv.y, 0.0, 1.0);
+      float width = 0.32 * pow(1.0 - y, 0.55) + 0.03; // base wide, tip narrow
+
+      // domain warping for licking tongues
+      float sway = 0.12 * sin(10.0*y - 6.0*t) * (1.0 - y);
+      float warp = (fbm(vec2(6.0*y - 2.0*t, 3.0*y + 1.7*t)) - 0.5) * 0.28 * (1.0 - y);
+      float xw = (p.x + sway + warp) / max(width, 1e-3);
+
+      // base cutoff and side falloff to form a tall flame
+      float side = smoothstep(1.1, 0.85, 1.0 - abs(xw));
+      float base = smoothstep(-0.15, 0.08, y);
+      float tip  = smoothstep(0.65, 1.10, y); // soften near top
+      float flameMask = side * base * (1.0 - 0.35*tip);
+
+      // NOISE & HEAT FIELD -----------------------------------------------
+      vec2 q = vec2(
+        fbm(4.0 * (p + vec2(0.00, up))),
+        fbm(4.0 * (p + vec2(5.20, 1.30) + vec2(0.0, up)))
+      );
+      vec2 r = vec2(
+        fbm(8.0 * (p + 1.2*q + vec2(1.70, 9.20) + vec2(0.0, up))),
+        fbm(8.0 * (p + 1.2*q + vec2(8.30, 2.80) + vec2(0.0, up)))
+      );
+      float f = fbm(8.0 * (p + 1.5*r + vec2(0.0, up)));
+
+      // Licks: sharpened noise towards the sides and modulated upwards
+      float tongues = smoothstep(0.25, 0.95, 1.0 - abs(xw)) * f;
+      float flicker = fbm(p*12.0 + vec2(0.0, -3.5*u_time)) * 0.25;
+      float heat = clamp((f*1.25 + 0.9*tongues + flicker) * flameMask, 0.0, 1.0);
+      heat *= u_intensity;
+
+      // Bright hot core near center/bottom
+      float core = exp(-15.0 * xw*xw) * smoothstep(0.0, 0.45, 1.0 - y);
+      heat = clamp(heat + 0.65*core, 0.0, 1.2);
+
+      // COLOR -------------------------------------------------------------
+      vec3 col = fireGradient(pow(heat, 1.05));
+      // subtle blue near the very base/core
+      vec3 blueCore = vec3(0.15, 0.20, 1.0);
+      col = mix(blueCore, col, smoothstep(0.05, 0.28, y));
+
+      // faint outer glow falloff
+      float glow = smoothstep(1.2, 0.85, abs(xw)) * (1.0 - y) * 0.25;
+      col += glow * vec3(1.0, 0.55, 0.2);
+
+      // soft smoke tint near very top
+      float smoke = smoothstep(0.72, 1.0, y) * 0.35 * (1.0 - heat);
+      col = mix(col, vec3(0.05), smoke);
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `;
+
+  var mat = new THREE.ShaderMaterial({
+    uniforms: uniforms,
+    vertexShader: vert,
+    fragmentShader: frag
+  });
+
+  var mesh = new THREE.Mesh(geo, mat);
+  scene.add(mesh);
+
+  function resize(){
+    var w = window.innerWidth;
+    var h = window.innerHeight;
+    renderer.setSize(w, h, false);
+    uniforms.u_aspect.value = w / Math.max(h, 1);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  var start = performance.now();
+  var rafId = 0;
+  function animate(){
+    rafId = requestAnimationFrame(animate);
+    var now = performance.now();
+    uniforms.u_time.value = (now - start) / 1000;
+    renderer.render(scene, camera);
+  }
+  animate();
+
+  // Cleanup on page unload (and if embedded in runner)
+  function cleanup(){
+    try{ cancelAnimationFrame(rafId); }catch(e){}
+    try{ geo.dispose(); }catch(e){}
+    try{ mat.dispose(); }catch(e){}
+    try{ renderer.dispose(); }catch(e){}
+    try{ var ext = renderer.getContext().getExtension('WEBGL_lose_context'); ext && ext.loseContext(); }catch(e){}
+  }
+  window.addEventListener('beforeunload', cleanup);
+  window.addEventListener('unload', cleanup);
+})();
+</script>
+</body>
+</html>
+
+

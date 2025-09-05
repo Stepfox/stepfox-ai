@@ -20,7 +20,7 @@ StepFox AI adds an AI-powered console runner block to your WordPress editor. Usi
 * **Live Preview**: See your generated code rendered in real-time within the editor
 * **Console Execution**: Run JavaScript code directly in the browser console
 * **Secure API Integration**: API keys are stored securely on the server
-* **Multiple Model Support**: Choose between GPT-3.5 Turbo, GPT-4, GPT-4 Turbo, GPT-4o, GPT-4o Mini, and GPT-5 models (gpt-5, gpt-5-mini, gpt-5-nano, gpt-5-chat-latest).
+* **Multiple Model Support**: Choose between GPT-3.5 Turbo, GPT-4, GPT-4 Turbo, GPT-4o, GPT-4o Mini, and GPT-5 models (gpt-5, gpt-5-mini, gpt-5-nano).
 * **Block Editor Integration**: Seamlessly integrated with the WordPress block editor
 
 = Use Cases =

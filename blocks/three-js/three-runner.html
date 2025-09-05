@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { height: 100%; margin: 0; background: transparent; }
+    canvas { display: block; }
+    #log { position: fixed; top: 8px; left: 8px; padding: 6px 8px; font: 12px monospace; background: rgba(0,0,0,.7); color: #0f0; border: 1px solid #0f0; border-radius: 4px; z-index: 9999; white-space: pre-wrap; max-width: 70vw; pointer-events: none; }
+  </style>
+  <script>
+    // Compute proxy URL using AI plugin endpoint
+    function aiProxy(u){ return '/wp-json/stepfox-ai/v1/proxy?url='+encodeURIComponent(u); }
+  </script>
+</head>
+<body>
+<div id="log">ready</div>
+<script>(function(){
+  // lightweight logger
+  var logEl = document.getElementById('log');
+  function log(m){ try{ var t=new Date().toISOString().split('T')[1].replace('Z',''); logEl.textContent=(logEl.textContent+'\n'+t+' '+m).trim().split('\n').slice(-8).join('\n'); }catch(e){} }
+  function post(stage, extra){ try{ window.parent.postMessage({ type:'sfl-three-status', stage:stage, extra: extra||null }, '*'); }catch(e){} }
+
+  // Suppress noisy Invalid LatLng exceptions
+  window.addEventListener('error', function(ev){ try{ var msg=String(ev.message||''); if (msg.indexOf('Invalid LatLng object')!==-1){ ev.preventDefault && ev.preventDefault(); ev.stopImmediatePropagation && ev.stopImmediatePropagation(); return false; } }catch(e){} });
+  window.addEventListener('unhandledrejection', function(ev){ try{ var r=ev.reason; var m=(r && (r.message||r))||''; if (String(m).indexOf('Invalid LatLng object')!==-1){ ev.preventDefault && ev.preventDefault(); return; } }catch(e){} });
+
+  // Proxy helpers
+  function proxy(u){ return aiProxy(u); }
+  (function(){
+    try{
+      var AL = ['cdn.jsdelivr.net','unpkg.com','cdnjs.cloudflare.com','raw.githubusercontent.com','geodata.ucdavis.edu','nominatim.openstreetmap.org','github.com','basemaps.cartocdn.com','tile.openstreetmap.org','fonts.googleapis.com','fonts.gstatic.com'];
+      function allow(h){ try{ return AL.indexOf(h)!==-1; }catch(e){ return false; } }
+      function toP(u){ return proxy(u); }
+      var of = window.fetch;
+      if (of){ window.fetch = function(input, init){
+        var origU = (typeof input==='string')?input:(input&&input.url)||'';
+        var usedProxy = false;
+        try{ if(origU){ var host=(new URL(origU,location.href)).host; if (allow(host)) { input=toP(origU); usedProxy=true; } } }catch(e){}
+        return of.call(this, input, init).then(function(res){
+          try{
+            if (res && res.status>=500 && origU){
+              // Fallback for GADM -> world dataset
+              if (origU.indexOf('geodata.ucdavis.edu')!==-1 || origU.indexOf('gadm')!==-1){
+                var alt='https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson';
+                return of.call(window, toP(alt), init);
+              }
+            }
+          }catch(e){}
+          return res;
+        });
+      }; }
+      var xo = window.XMLHttpRequest && XMLHttpRequest.prototype && XMLHttpRequest.prototype.open;
+      if (xo){ XMLHttpRequest.prototype.open = function(m,u){ try{ var host=(new URL(u,location.href)).host; if (allow(host)) u=toP(u); }catch(e){} return xo.call(this, m, u); }; }
+    }catch(e){}
+  })();
+
+  // Loaders
+  function loadScript(src, cb){ var s=document.createElement('script'); s.src=src; s.async=false; s.onload=function(){ cb&&cb(); }; s.onerror=function(){ cb&&cb(); }; document.head.appendChild(s); }
+  function loadCSS(h){ return new Promise(function(res){ var l=document.createElement('link'); l.rel='stylesheet'; l.href=h; l.onload=function(){ res(); }; l.onerror=function(){ res(); }; document.head.appendChild(l); }); }
+  function absoluteUrl(u){ try{ return new URL(u, location.href).href; }catch(e){ return u; } }
+
+  function installLeafletLatLngGuards(){ try{
+    if (!window.L || window.L.__sflLatLngGuard) return;
+    // Guard factory
+    if (typeof window.L.latLng === 'function'){
+      var oFactory = window.L.latLng;
+      window.L.latLng = function(a,b,c){ try{
+        if (a && typeof a==='object'){ var la=Number(a.lat), ln=Number(a.lng); if(!isFinite(la)) la=0; if(!isFinite(ln)) ln=0; return oFactory({lat:la,lng:ln}, b); }
+        var la=Number(a), ln=Number(b); if(!isFinite(la)) la=0; if(!isFinite(ln)) ln=0; return oFactory(la, ln, c);
+      }catch(e){ try{ return oFactory(0,0,c);}catch(_e){ return { lat:0, lng:0 }; } } };
+    }
+    // Guard constructor (best-effort)
+    if (typeof window.L.LatLng === 'function'){
+      var Orig = window.L.LatLng;
+      function SafeLatLng(a,b,c){ if(!(this instanceof SafeLatLng)) return window.L.latLng(a,b,c); var la=Number(a), ln=Number(b); if(!isFinite(la)) la=0; if(!isFinite(ln)) ln=0; return Orig.call(this, la, ln, c); }
+      SafeLatLng.prototype = Orig.prototype;
+      window.L.LatLng = SafeLatLng;
+    }
+    window.L.__sflLatLngGuard = true;
+  }catch(e){ log('latlng-guard-err'); }
+  }
+
+  // Leaflet guards (minimal)
+  function hookLeaflet(){ try{
+    if (!window.L) return;
+    // Map container clone to avoid "already initialized"
+    if (window.L.Map && !window.L.Map.prototype.__sflInitPatched){
+      var proto = window.L.Map.prototype; var orig = proto._initContainer;
+      proto._initContainer = function(id){ try{ var el=(typeof id==='string')?document.getElementById(id):id; if (el && (el._leaflet_id || (el.classList && el.classList.contains('leaflet-container')))){ var par=el.parentNode; if(par){ var clone=el.cloneNode(false); clone.removeAttribute('class'); clone.removeAttribute('_leaflet_id'); par.replaceChild(clone, el); el=clone; } } return orig.call(this, el||id); }catch(e){ return orig.call(this, id); } };
+      proto.__sflInitPatched = true;
+    }
+    if (window.L.Map && !window.L.Map.prototype.__sflFitGuard){
+      var oFit = window.L.Map.prototype.fitBounds;
+      window.L.Map.prototype.fitBounds = function(b,o){ try{ if(!b||typeof b.isValid!=='function'||!b.isValid()) return this; }catch(e){ return this; } try{ return oFit.call(this,b,o);}catch(e){ return this; } };
+      if (typeof window.L.Map.prototype.flyToBounds==='function'){
+        var oFly = window.L.Map.prototype.flyToBounds;
+        window.L.Map.prototype.flyToBounds = function(b,o){ try{ if(!b||typeof b.isValid!=='function'||!b.isValid()) return this; }catch(e){ return this; } try{ return oFly.call(this,b,o);}catch(e){ return this; } };
+      }
+      window.L.Map.prototype.__sflFitGuard = true;
+    }
+    if (window.L.Bounds && !window.L.Bounds.prototype.__sflSafe){
+      var oI = window.L.Bounds.prototype.intersects;
+      window.L.Bounds.prototype.intersects = function(b,o){ try{ var m=this&&this.min,M=this&&this.max; if(!m||!M||!isFinite(m.x)||!isFinite(m.y)||!isFinite(M.x)||!isFinite(M.y)) return false; if(!b||!b.min||!b.max||!isFinite(b.min.x)||!isFinite(b.min.y)||!isFinite(b.max.x)||!isFinite(b.max.y)) return false; }catch(e){ return false; } try{ return oI.call(this,b,o);}catch(e){ return false; } };
+      window.L.Bounds.prototype.__sflSafe = true;
+    }
+    installLeafletLatLngGuards();
+  }catch(e){} }
+
+  // Execute JS payload (via blob)
+  function runJS(code){ try{ var wrapped='(function(){try\n{\n'+String(code)+'\n}\ncatch(e){}})();'; var bl=new Blob([wrapped],{type:'text/javascript'}); var u=URL.createObjectURL(bl); loadScript(u,function(){ try{ URL.revokeObjectURL(u);}catch(e){} }); }catch(e){}
+  }
+
+  // Execute full HTML payload
+  async function runHTML(html, useProxy, bg){
+    try{ if(bg){ document.documentElement.style.background=bg; document.body.style.background=bg; } }catch(e){}
+    var dom=(new DOMParser()).parseFromString(String(html||''),'text/html');
+    document.body.innerHTML='';
+    var head=dom.head||document.createElement('head');
+    var body=dom.body||document.createElement('body');
+    var css=[];
+    head.querySelectorAll('link[rel="stylesheet"]').forEach(function(l){ var h=l.getAttribute('href')||''; if(!h) return; if(useProxy&&(h.startsWith('http://')||h.startsWith('https://'))) h=proxy(h); css.push(loadCSS(absoluteUrl(h))); });
+    head.querySelectorAll('style').forEach(function(st){ var s=document.createElement('style'); s.textContent=st.textContent; document.head.appendChild(s); });
+    var wrapper=document.createElement('div'); while (body.firstChild) wrapper.appendChild(body.firstChild); document.body.appendChild(wrapper);
+    await Promise.all(css);
+    var scripts=[]; Array.prototype.forEach.call(head.querySelectorAll('script'), function(s){ scripts.push(s); }); Array.prototype.forEach.call(wrapper.querySelectorAll('script'), function(s){ scripts.push(s); });
+    function next(i){ if(i>=scripts.length){ return; } hookLeaflet(); installLeafletLatLngGuards(); var s=scripts[i]; if (s.src){ var src=s.getAttribute('src'); if(useProxy&&(src.startsWith('http://')||src.startsWith('https://'))) src=proxy(src); loadScript(absoluteUrl(src), function(){ hookLeaflet(); installLeafletLatLngGuards(); next(i+1); }); } else { var t=s.textContent||''; var b=new Blob([t],{type:'text/javascript'}); var u=URL.createObjectURL(b); loadScript(u, function(){ try{ URL.revokeObjectURL(u);}catch(e){} hookLeaflet(); installLeafletLatLngGuards(); next(i+1); }); } }
+    next(0);
+  }
+
+  function handlePayload(p){ try{
+    log('payload');
+    try{ if(p && p.background){ document.documentElement.style.background=p.background; document.body.style.background=p.background; } }catch(e){}
+    post('payload-ack');
+    var isHtml = !!p.isHtml;
+    var code = p.code || '';
+    // Safety: auto-detect HTML even if flag was not set
+    try{ if(!isHtml && /<(?:!doctype|html|head|body|meta|link|style|script)\b/i.test(code)){ isHtml = true; } }catch(e){}
+    if (isHtml){ runHTML(code, !!p.useProxy, p.background||'#000'); return; }
+    if (p.autoLoadThree){
+      var local1 = (window.frameElement && window.frameElement.getAttribute('data-local1')) || p.local1 || '';
+      var local2 = (window.frameElement && window.frameElement.getAttribute('data-local2')) || p.local2 || '';
+      var srcs=[]; if(local1) srcs.push(local1); if(local2) srcs.push(local2);
+      srcs.push('https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.min.js');
+      srcs.push('https://unpkg.com/three@0.165.0/build/three.min.js');
+      srcs.push('https://cdnjs.cloudflare.com/ajax/libs/three.js/0.165.0/three.min.js');
+      // If THREE already present, just execute
+      if (window.THREE){ runJS(code); return; }
+      // Prevent parallel loaders across rapid payloads
+      if (!window.__sfa_three_loading){
+        window.__sfa_three_loading = true;
+        var i=0;
+        (function loadNext(){
+          if (window.THREE || window.__sfa_three_loaded){ window.__sfa_three_loaded = true; return; }
+          if (i>=srcs.length){ return; }
+          var u=srcs[i++];
+          loadScript(u, function(){
+            // After each attempt, either THREE is available or we try next
+            if (window.THREE){ window.__sfa_three_loaded = true; return; }
+            loadNext();
+          });
+        })();
+      }
+      // Wait for THREE to become available, then run code. Time out gracefully.
+      var waits=0, maxWaits=80; // ~10s
+      var waitTimer=setInterval(function(){
+        if (window.THREE){ clearInterval(waitTimer); window.__sfa_three_loaded = true; runJS(code); return; }
+        if (++waits>maxWaits){ clearInterval(waitTimer); runJS(code); }
+      }, 125);
+    } else { runJS(code); }
+  }catch(e){ console.error(e); }
+  }
+
+  // URL param payload
+  try{ var usp=new URLSearchParams(location.search); var p=usp.get('p'); if(p){ var json=atob(decodeURIComponent(p)); var data=JSON.parse(json); handlePayload(data); } }catch(e){ console.warn('url payload parse failed', e); }
+
+  // postMessage payload
+  window.addEventListener('message', function(ev){ if(!ev||!ev.data) return; if (ev.data.type==='sfl-three-run'){ handlePayload(ev.data); } });
+
+  post('runner-ready');
+})();
+</script>
+</body>
+</html>
+
+

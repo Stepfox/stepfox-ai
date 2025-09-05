@@ -261,11 +261,11 @@ class StepFox_AI_API {
             'gpt-4o-mini'
         );
         if ($gpt5_images_enabled) {
-            $vision_models = array_merge($vision_models, array('gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-chat-latest'));
+            $vision_models = array_merge($vision_models, array('gpt-5', 'gpt-5-mini', 'gpt-5-nano'));
         }
         
         // GPT-5 models are available via API aliases; log selection
-        $gpt5_models = array('gpt-5', 'gpt-5-mini', 'gpt-5-nano', 'gpt-5-chat-latest');
+        $gpt5_models = array('gpt-5', 'gpt-5-mini', 'gpt-5-nano');
         if (in_array($model, $gpt5_models)) {
             error_log('StepFox AI - Using GPT-5 model: ' . $model);
         }
@@ -338,6 +338,15 @@ class StepFox_AI_API {
 
         error_log('StepFox AI - API selected: ' . ($uses_responses_api ? 'Responses' : 'Chat') . ' (mode=' . $api_mode_pref . ', images=' . (is_array($images) ? count($images) : 0) . ', gpt5_images=' . ($gpt5_images_enabled ? '1' : '0') . ')');
 
+        // Read generation options from settings
+        $opt_max_tokens = intval(get_option('stepfox_ai_max_tokens', 16000));
+        $opt_temperature = floatval(get_option('stepfox_ai_temperature', 0.7));
+        $opt_top_p = floatval(get_option('stepfox_ai_top_p', 1.0));
+        $opt_presence_penalty = floatval(get_option('stepfox_ai_presence_penalty', 0.0));
+        $opt_frequency_penalty = floatval(get_option('stepfox_ai_frequency_penalty', 0.0));
+        $stop_raw = trim((string) get_option('stepfox_ai_stop_sequences', ''));
+        $opt_stop_sequences = array_slice(array_values(array_filter(array_map('trim', explode(',', $stop_raw)), 'strlen')), 0, 4);
+
         // Prepare the request body based on model type
         $has_images = !empty($images) && is_array($images);
         if ($uses_responses_api) {
@@ -365,10 +374,10 @@ class StepFox_AI_API {
                     array('role' => 'user', 'content' => $content)
                 ),
                 'text' => array('format' => array('type' => 'text')),
-                'max_output_tokens' => 20000,
+                'max_output_tokens' => $opt_max_tokens,
             );
             if (!$this->is_temperature_restricted_model($model)) {
-                $body['temperature'] = 0.7;
+                $body['temperature'] = $opt_temperature;
             }
         } else {
             // Chat Completions schema
@@ -388,7 +397,7 @@ class StepFox_AI_API {
                 $body = array(
                     'model' => $model,
                     'messages' => array(array('role' => 'user', 'content' => $user_content)),
-                    $max_tokens_param => 16000,
+                    $max_tokens_param => $opt_max_tokens,
                 );
             } else {
                 $body = array(
@@ -397,11 +406,24 @@ class StepFox_AI_API {
                         array('role' => 'system', 'content' => $system_prompt),
                         array('role' => 'user', 'content' => $prompt)
                     ),
-                    $max_tokens_param => 16000,
+                    $max_tokens_param => $opt_max_tokens,
                 );
             }
             if (!$this->is_temperature_restricted_model($model)) {
-                $body['temperature'] = 0.7;
+                $body['temperature'] = $opt_temperature;
+            }
+            // Additional sampling controls for Chat Completions
+            if ($opt_top_p >= 0 && $opt_top_p <= 1 && $opt_top_p !== 1.0) {
+                $body['top_p'] = $opt_top_p;
+            }
+            if ($opt_presence_penalty !== 0.0) {
+                $body['presence_penalty'] = $opt_presence_penalty;
+            }
+            if ($opt_frequency_penalty !== 0.0) {
+                $body['frequency_penalty'] = $opt_frequency_penalty;
+            }
+            if (!empty($opt_stop_sequences)) {
+                $body['stop'] = $opt_stop_sequences;
             }
         }
 

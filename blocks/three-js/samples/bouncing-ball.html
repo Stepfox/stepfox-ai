@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Neon Bouncing Ball</title>
+  <style>
+    :root{ --bg:transparent; --neon:#00ffe1; }
+    html,body{ height:100%; margin:0; background:transparent !important; color:#9ff; }
+    body{ overflow:hidden; background:transparent !important; }
+    canvas{ display:block; width:100vw; height:100vh; background:transparent !important; }
+    .hud{ position:fixed; top:10px; left:50%; transform:translateX(-50%); z-index:3; color:#0ff;
+      font:600 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; text-shadow:0 0 8px var(--neon); }
+    .hint{ position:fixed; bottom:10px; left:50%; transform:translateX(-50%); color:#8ff; opacity:.8; z-index:3; font:12px/1.2 system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div class="hud">Neon Bouncing Ball</div>
+  <div class="hint">Click to add balls · Press R to reset</div>
+  <canvas id="c"></canvas>
+  <script>
+  (function(){
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+
+    function resize(){
+      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      canvas.width = Math.floor(innerWidth * dpr);
+      canvas.height = Math.floor(innerHeight * dpr);
+      canvas.style.width = innerWidth + 'px';
+      canvas.style.height = innerHeight + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    addEventListener('resize', resize, { passive:true });
+    resize();
+
+    // Physics world
+    const balls = [];
+    const GRAVITY = 980;       // px/s^2
+    const RESTITUTION = 0.78;  // bounce energy retain
+    const FRICTION = 0.0025;   // horizontal friction
+
+    function makeBall(x, y){
+      const r = 16 + Math.random()*18;
+      const hue = (180 + Math.random()*100)|0;
+      return {
+        x, y, r,
+        vx: (Math.random()*300-150),
+        vy: (Math.random()*-300-100),
+        color: `hsl(${hue} 100% 60%)`
+      };
+    }
+
+    function reset(){
+      balls.length = 0;
+      for (let i=0;i<4;i++) balls.push(makeBall(innerWidth*0.5 + i*4, innerHeight*0.3 - i*10));
+    }
+    reset();
+
+    // Drawing helpers
+    function drawNeonBall(b){
+      // Additive glow
+      const prev = ctx.globalCompositeOperation;
+      ctx.globalCompositeOperation = 'lighter';
+
+      const g = ctx.createRadialGradient(b.x, b.y, 2, b.x, b.y, b.r*1.4);
+      g.addColorStop(0, '#fff');
+      g.addColorStop(0.2, b.color);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+
+      ctx.shadowColor = b.color;
+      ctx.shadowBlur = 25;
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+      ctx.fill();
+
+      // thin bright rim
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r-0.5, 0, Math.PI*2); ctx.stroke();
+
+      ctx.globalCompositeOperation = prev;
+    }
+
+    let last = performance.now();
+    function frame(now){
+      const dt = Math.min(0.033, (now - last)/1000); // seconds
+      last = now;
+
+      // transparent trails: fade previous frame using destination-out
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = 'rgba(0,0,0,0.12)'; // erase ~12% each frame
+      ctx.fillRect(0,0,innerWidth,innerHeight);
+      ctx.restore();
+
+      // physics step
+      for (const b of balls){
+        b.vy += GRAVITY * dt;
+        b.x  += b.vx * dt;
+        b.y  += b.vy * dt;
+
+        // collide with floor & walls
+        const L = b.r, R = innerWidth - b.r, T = b.r, B = innerHeight - b.r;
+        if (b.x < L){ b.x = L; b.vx *= -RESTITUTION; }
+        if (b.x > R){ b.x = R; b.vx *= -RESTITUTION; }
+        if (b.y < T){ b.y = T; b.vy *= -RESTITUTION; }
+        if (b.y > B){ b.y = B; b.vy *= -RESTITUTION; b.vx *= (1 - FRICTION*GRAVITY*dt*60); }
+      }
+
+      // draw
+      for (const b of balls) drawNeonBall(b);
+
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    // Interactions
+    addEventListener('click', function(ev){
+      const rect = canvas.getBoundingClientRect();
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
+      balls.push(makeBall(x, y));
+    });
+    addEventListener('keydown', function(ev){ if (ev.key==='r' || ev.key==='R') reset(); });
+  })();
+  </script>
+</body>
+</html>

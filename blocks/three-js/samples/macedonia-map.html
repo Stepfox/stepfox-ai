@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>North Macedonia — Major Towns Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --neon: #00fff0;
+      --neon-dim: #00e5ff;
+      --bg: #000000;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); }
+    #map { width: 100%; height: 100%; background: var(--bg); }
+    .scanlines {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(0,255,240,0.06) 0px,
+        rgba(0,255,240,0.06) 1px,
+        rgba(0,0,0,0) 2px,
+        rgba(0,0,0,0) 4px
+      );
+      mix-blend-mode: screen;
+      animation: scanShift 6s linear infinite;
+    }
+    @keyframes scanShift { from { background-position: 0 0; } to { background-position: 0 8px; } }
+    .label {
+      background: rgba(0, 20, 20, 0.75);
+      border: 1px solid var(--neon);
+      color: var(--neon);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font: 600 13px/1.2 "Orbitron", "Exo 2", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      letter-spacing: 0.4px;
+      text-shadow: 0 0 6px var(--neon), 0 0 12px var(--neon);
+      white-space: nowrap;
+      box-shadow: 0 0 12px rgba(0,255,240,0.35) inset, 0 0 10px rgba(0,255,240,0.25);
+    }
+    /* Leaflet UI dark overrides */
+    .leaflet-control-attribution { background: rgba(0,0,0,0.6) !important; color: var(--neon) !important; border: 1px solid rgba(0,255,240,0.25); }
+    .leaflet-control-attribution a { color: var(--neon) !important; }
+    .leaflet-bar a {
+      background: rgba(0,0,0,0.75) !important;
+      color: var(--neon) !important;
+      border-bottom: 1px solid rgba(0,255,240,0.25) !important;
+      box-shadow: 0 0 10px rgba(0,255,240,0.3) inset;
+    }
+    .leaflet-bar a:hover { background: rgba(0, 30, 30, 0.9) !important; }
+    .leaflet-tooltip.city-label { background: transparent; border: 0; box-shadow: none; color: var(--neon); pointer-events: none; }
+
+    /* Neon border styling */
+    .neon-pane path { vector-effect: non-scaling-stroke; }
+    .neon-outer { filter: drop-shadow(0 0 18px rgba(0,255,240,0.35)) drop-shadow(0 0 32px rgba(0,255,240,0.25)); }
+    .neon-mid { filter: drop-shadow(0 0 12px rgba(0,255,240,0.55)) drop-shadow(0 0 24px rgba(0,255,240,0.45)); }
+    .neon-core { filter: drop-shadow(0 0 8px rgba(0,255,240,0.9)); animation: neonPulse 3.2s ease-in-out infinite; }
+    @keyframes neonPulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.85; }
+    }
+    .mask-pane path { fill-rule: evenodd; }
+    .leaflet-interactive.clickable { cursor: pointer; }
+
+    /* Hover window */
+    .hover-window {
+      position: absolute;
+      min-width: 220px;
+      max-width: 320px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: radial-gradient(120px 80px at 20% 0%, rgba(0,255,240,0.18), rgba(0,255,240,0.06) 45%, rgba(0,0,0,0.8) 55%), rgba(0,0,0,0.85);
+      border: 1px solid var(--neon);
+      color: var(--neon);
+      box-shadow: 0 0 18px rgba(0,255,240,0.35), inset 0 0 12px rgba(0,255,240,0.2);
+      font: 600 14px/1.35 "Orbitron", "Exo 2", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      letter-spacing: 0.6px;
+      pointer-events: none;
+      opacity: 0;
+      transform: translate(-50%, -14px) scale(0.98);
+      transition: opacity .22s ease, transform .22s ease;
+      z-index: 1000;
+    }
+    .hover-window.visible { opacity: 1; transform: translate(-50%, -18px) scale(1); }
+    .hover-window .title { font-weight: 800; margin-bottom: 6px; text-shadow: 0 0 8px var(--neon); }
+    .hover-window .body { opacity: 0.95; }
+    /* Alert + flash + shake */
+    .alert-banner {
+      position: fixed;
+      top: 48px;
+      left: 0; right: 0;
+      text-align: center;
+      color: #ff2640;
+      text-shadow: 0 0 10px rgba(255,38,64,0.8), 0 0 20px rgba(255,38,64,0.6);
+      font: 700 28px/1 'VT323', 'Share Tech Mono', monospace;
+      letter-spacing: 2px;
+      opacity: 0;
+      transition: opacity .25s ease;
+      z-index: 1500;
+      pointer-events: none;
+    }
+    .alert-banner.visible { opacity: 1; }
+    #flash {
+      position: fixed; inset: 0; pointer-events: none; z-index: 1600; opacity: 0;
+      background: radial-gradient(circle at center, rgba(255,255,255,0.95) 0%, rgba(255,200,0,0.6) 20%, rgba(255,80,0,0.0) 60%);
+      mix-blend-mode: screen;
+    }
+    #flash.active { animation: flashFade 0.9s ease-out 1; }
+    @keyframes flashFade { 0% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes quake { 0%,100% { transform: translate(0,0); } 20% { transform: translate(2px,-1px); } 40% { transform: translate(-3px,2px); } 60% { transform: translate(1px,0); } 80% { transform: translate(-1px,2px); } }
+    #map.shake { animation: quake 0.35s cubic-bezier(.36,.07,.19,.97) 8; }
+    /* Matrix banner */
+    .matrix-banner {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 46px;
+      overflow: hidden;
+      pointer-events: none;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.95), rgba(0,0,0,0.6));
+      border-bottom: 1px solid rgba(0,255,240,0.22);
+      z-index: 1400;
+      mix-blend-mode: screen;
+    }
+    .matrix-stream {
+      display: inline-block;
+      white-space: nowrap;
+      color: #00ff66;
+      text-shadow: 0 0 6px rgba(0,255,102,0.9), 0 0 14px rgba(0,255,102,0.55);
+      font: 28px/46px 'VT323', 'Share Tech Mono', monospace;
+      letter-spacing: 2px;
+      animation: matrix-marquee 20s linear infinite;
+      will-change: transform;
+    }
+    @keyframes matrix-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+    /* Kapishtec neon label */
+    .kapistec-label { pointer-events: none; }
+    .kapistec-label .neon-title {
+      color: var(--neon);
+      font: 800 clamp(28px, 6vw, 110px)/1 "Orbitron", "Exo 2", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      text-shadow: 0 0 10px rgba(0,255,240,0.9), 0 0 22px rgba(0,255,240,0.6), 0 0 40px rgba(0,255,240,0.45);
+      transform: translate(-50%, -50%);
+      white-space: nowrap;
+      animation: kapPulse 2.8s ease-in-out infinite;
+    }
+    @keyframes kapPulse { 0%,100% { filter: drop-shadow(0 0 14px rgba(0,255,240,0.8)); } 50% { filter: drop-shadow(0 0 28px rgba(0,255,240,1)); } }
+  </style>
+</head>
+<body>
+<div class="matrix-banner" aria-hidden="true">
+  <div id="matrixStream" class="matrix-stream"></div>
+</div>
+<div id="map"></div>
+<div id="hoverWin" class="hover-window" role="status" aria-live="polite">
+  <div class="title">Skopje</div>
+  <div class="body">This is the best city in the world.</div>
+  <div class="body">Click to visit stepfoxthemes.com</div>
+  </div>
+<div id="alert" class="alert-banner">NUCLEAR LAUNCH DETECTED</div>
+<div id="flash"></div>
+<div class="scanlines"></div>
+<script>
+(function(){
+  function loadScript(src, onload, onerror){
+    var s=document.createElement('script');
+    s.src=src; s.onload=onload; s.onerror=onerror||function(){};
+    document.head.appendChild(s);
+  }
+  function loadCSS(href){
+    var l=document.createElement('link');
+    l.rel='stylesheet'; l.href=href; document.head.appendChild(l);
+  }
+
+  function boot(){
+    if(window.L){ init(); return; }
+    var cssSources=[
+      'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
+      'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css',
+      'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css',
+      'https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800&family=Exo+2:wght@400;600&display=swap',
+      'https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap'
+    ];
+    cssSources.forEach(loadCSS);
+
+    var jsSources=[
+      'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+      'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js'
+    ];
+    var i=0; (function next(){
+      if(window.L){ init(); return; }
+      if(i>=jsSources.length){ console.error('Failed to load Leaflet'); return; }
+      loadScript(jsSources[i++], function(){ if(window.L) init(); else next(); }, next);
+    })();
+  }
+
+  function init(){
+    var map=L.map('map', { zoomControl: true, attributionControl: true }).setView([41.6086, 21.7453], 7);
+    var maskPane = map.createPane('mask');
+    maskPane.style.zIndex = 300; // above tiles, below markers
+    maskPane.classList.add('mask-pane');
+    var neonPane = map.createPane('neon');
+    neonPane.style.zIndex = 650;
+    neonPane.style.mixBlendMode = 'screen';
+    neonPane.classList.add('neon-pane');
+    var fxPane = map.createPane('fx');
+    fxPane.style.zIndex = 700;
+    fxPane.style.mixBlendMode = 'screen';
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 20,
+      subdomains: 'abcd',
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    // Initialize matrix banner text
+    var matrix = document.getElementById('matrixStream');
+    if(matrix){
+      var phrase = ' IDE WW3 FOO ';
+      var repeated = phrase.repeat(60);
+      matrix.textContent = repeated + repeated; // double for seamless loop
+    }
+
+    var towns=[
+      // name, lat, lon, approx population order (for radius)
+      ['Skopje', 41.9973, 21.4280, 1],
+      ['Bitola', 41.0314, 21.3347, 0.4],
+      ['Kumanovo', 42.1320, 21.7140, 0.45],
+      ['Prilep', 41.3442, 21.5528, 0.4],
+      ['Tetovo', 42.0097, 20.9715, 0.45],
+      ['Veles', 41.7166, 21.7755, 0.3],
+      ['Ohrid', 41.1231, 20.8016, 0.28],
+      ['Gostivar', 41.8006, 20.9089, 0.3],
+      ['Shtip', 41.7459, 22.1950, 0.32],
+      ['Strumica', 41.4378, 22.6435, 0.33],
+      ['Kavadarci', 41.4331, 22.0110, 0.28],
+      ['Kichevo', 41.5126, 20.9580, 0.25],
+      ['Kochani', 41.9167, 22.4128, 0.25],
+      ['Gevgelija', 41.1416, 22.5025, 0.2],
+      ['Negotino', 41.4836, 22.0900, 0.2],
+      ['Kriva Palanka', 42.2019, 22.3308, 0.18],
+      ['Berovo', 41.7050, 22.8575, 0.15],
+      ['Delchevo', 41.9679, 22.7697, 0.17],
+      ['Radovish', 41.6383, 22.4642, 0.2],
+      ['Resen', 41.0887, 21.0119, 0.17],
+      ['Makedonski Brod', 41.5131, 21.2176, 0.15],
+      ['Struga', 41.1770, 20.6775, 0.25],
+      ['Debar', 41.5244, 20.5247, 0.18]
+    ];
+
+    var bounds=[];
+    towns.forEach(function(t){
+      var name=t[0], lat=t[1], lon=t[2], scale=t[3];
+      var glow=L.circleMarker([lat, lon], {
+        radius: 14 + scale*12,
+        color: 'transparent',
+        weight: 0,
+        fillColor: '#00fff0',
+        fillOpacity: 0.18,
+        interactive: false
+      }).addTo(map);
+      var isSkopje = name === 'Skopje';
+      var marker=L.circleMarker([lat, lon], {
+        radius: 8 + scale*10,
+        color: '#00e5ff',
+        weight: 2,
+        fillColor: '#00fff0',
+        fillOpacity: 0.95,
+        className: isSkopje ? 'clickable' : ''
+      }).addTo(map);
+      marker.bindTooltip('<div class="label">'+name+'</div>', {permanent: true, direction: 'top', opacity: 1, className: 'city-label', offset: [0, -10]});
+      if(isSkopje){
+        marker.on('click', function(){ window.open('https://stepfoxthemes.com', '_blank', 'noopener'); });
+        marker.on('mouseover', function(e){ showHoverWindow(e.latlng); });
+        marker.on('mouseout', function(){ hideHoverWindow(); });
+        marker.on('mousemove', function(e){ moveHoverWindow(e.latlng); });
+      }
+      bounds.push([lat, lon]);
+    });
+
+    if(bounds.length){ map.fitBounds(bounds, { padding: [40, 40] }); }
+
+    // Load and draw neon country border using real geometry (OSM/Nominatim), with graceful fallbacks
+    (function loadBorder(){
+      var tried = [];
+
+      function fromNominatim(){
+        tried.push('nominatim');
+        var url='https://nominatim.openstreetmap.org/search?country=North%20Macedonia&format=json&polygon_geojson=1&limit=1';
+        fetch(url, {headers:{'Accept':'application/json'}})
+          .then(function(r){ return r.json(); })
+          .then(function(arr){
+            if(!Array.isArray(arr) || !arr[0] || !arr[0].geojson){ throw new Error('no nominatim geojson'); }
+            var feature = { type:'Feature', properties:{ source:'nominatim' }, geometry: arr[0].geojson };
+            addNeonBorder(feature);
+          })
+          .catch(fromWorldDataset);
+      }
+
+      function fromWorldDataset(){
+        tried.push('world-dataset');
+        fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson')
+          .then(function(r){ return r.json(); })
+          .then(function(fc){
+            var f=(fc.features||[]).find(function(x){ var p=x.properties||{}; return p.ISO_A3==='MKD' || p.ADMIN==='North Macedonia' || p.SOVEREIGNT==='North Macedonia'; });
+            if(!f) throw new Error('not found in dataset');
+            addNeonBorder(f);
+          })
+          .catch(fromGADM);
+      }
+
+      function fromGADM(){
+        tried.push('gadm');
+        fetch('https://geodata.ucdavis.edu/gadm/gadm4.1/json/gadm41_MKD_0.json')
+          .then(function(r){ return r.json(); })
+          .then(function(geo){ addNeonBorder(geo.features ? geo.features[0] : geo); })
+          .catch(drawFallbackEllipse);
+      }
+
+      function addNeonBorder(geo){
+        addMask(geo);
+        var glow1 = L.geoJSON(geo, { pane:'neon', style: { color: '#00fff0', weight: 18, opacity: 0.10, fill: false, lineJoin: 'round', className:'neon-outer' } }).addTo(map);
+        var glow2 = L.geoJSON(geo, { pane:'neon', style: { color: '#00fff0', weight: 10, opacity: 0.28, fill: false, lineJoin: 'round', className:'neon-mid' } }).addTo(map);
+        var core  = L.geoJSON(geo, { pane:'neon', style: { color: '#00eaff', weight: 3,  opacity: 1.0, fill: false, lineJoin: 'round', className:'neon-core' } }).addTo(map);
+        var b = core.getBounds();
+        if(b && b.isValid()) { map.fitBounds(b.pad(0.12)); }
+      }
+
+      function addMask(geo){
+        try{
+          var g = geo.geometry || geo;
+          if(!g) return;
+          var worldRing = [
+            [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]
+          ];
+          var holes = [];
+          if(g.type === 'Polygon'){
+            if(g.coordinates && g.coordinates[0]) holes.push(g.coordinates[0]);
+          } else if (g.type === 'MultiPolygon'){
+            for(var i=0;i<g.coordinates.length;i++){
+              if(g.coordinates[i] && g.coordinates[i][0]) holes.push(g.coordinates[i][0]);
+            }
+          }
+          if(!holes.length) return;
+          var maskFeature = { type:'Feature', properties:{}, geometry:{ type:'Polygon', coordinates:[worldRing].concat(holes) } };
+          L.geoJSON(maskFeature, {
+            pane:'mask',
+            interactive:false,
+            style:{ color:'#000', weight:0, fillColor:'#000', fillOpacity:1, fillRule:'evenodd' }
+          }).addTo(map);
+        }catch(e){ /* ignore */ }
+      }
+
+      function drawFallbackEllipse(){
+        // Fallback approximate border if remote sources are unavailable
+        var center=[41.6, 21.7];
+        var aLat=0.9, aLng=1.2;
+        var pts=[];
+        for(var t=0;t<360;t+=2){ var rad=t*Math.PI/180; pts.push([ center[0]+Math.sin(rad)*aLat, center[1]+Math.cos(rad)*aLng ]); }
+        L.polyline(pts, { pane:'neon', color:'#00fff0', weight:18, opacity:0.10, className:'neon-outer' }).addTo(map);
+        L.polyline(pts, { pane:'neon', color:'#00fff0', weight:10, opacity:0.28, className:'neon-mid' }).addTo(map);
+        var core=L.polyline(pts, { pane:'neon', color:'#00eaff', weight:3, opacity:1.0, className:'neon-core' }).addTo(map);
+        var b = core.getBounds(); if(b && b.isValid()) { map.fitBounds(b.pad(0.12)); }
+      }
+
+      fromNominatim();
+    })();
+
+    // Hover window helpers
+    var hoverWin = document.getElementById('hoverWin');
+    function latLngToContainerPoint(latlng){ return map.latLngToContainerPoint(latlng); }
+    function showHoverWindow(latlng){
+      var pt = latLngToContainerPoint(latlng);
+      hoverWin.style.left = pt.x + 'px';
+      hoverWin.style.top = pt.y + 'px';
+      hoverWin.classList.add('visible');
+    }
+    function moveHoverWindow(latlng){
+      if(!hoverWin.classList.contains('visible')) return;
+      var pt = latLngToContainerPoint(latlng);
+      hoverWin.style.left = pt.x + 'px';
+      hoverWin.style.top = pt.y + 'px';
+    }
+    function hideHoverWindow(){ hoverWin.classList.remove('visible'); }
+
+    // Nuclear strike after delay
+    setTimeout(function(){
+      showAlert('NUCLEAR LAUNCH DETECTED');
+      strikeCity('Veles');
+    }, 3000);
+
+    function showAlert(text){
+      var el=document.getElementById('alert'); if(!el) return;
+      el.textContent=text; el.classList.add('visible');
+      setTimeout(function(){ el.classList.remove('visible'); }, 2600);
+    }
+    function screenFlash(){ var f=document.getElementById('flash'); if(!f) return; f.classList.remove('active'); void f.offsetWidth; f.classList.add('active'); }
+
+    function strikeCity(name){
+      var t = towns.find(function(x){ return x[0]===name; });
+      if(!t) return; strikeAt([t[1], t[2]]);
+    }
+
+    function strikeAt(latlng){
+      screenFlash();
+      document.getElementById('map').classList.add('shake');
+      setTimeout(function(){ document.getElementById('map').classList.remove('shake'); }, 2800);
+
+      var center = L.latLng(latlng[0], latlng[1]);
+      var shock = L.circle(center, { pane:'fx', radius: 80, color:'#ffae00', weight:3, opacity:1, fill:false }).addTo(map);
+      var fire  = L.circle(center, { pane:'fx', radius: 60, color:'#ffd000', weight:2, opacity:1, fill:true, fillColor:'#ff5a00', fillOpacity:0.6 }).addTo(map);
+      var glow  = L.circle(center, { pane:'fx', radius: 90, color:'#ff6600', weight:0, opacity:0, fill:true, fillColor:'#ff6600', fillOpacity:0.25 }).addTo(map);
+
+      var ripples = [];
+      function addRipple(delay){
+        setTimeout(function(){
+          var r=L.circle(center, { pane:'fx', radius: 90, color:'#ffae00', weight:2, opacity:0.9, fill:false }).addTo(map);
+          ripples.push(r);
+        }, delay);
+      }
+      addRipple(400); addRipple(800); addRipple(1200);
+
+      var start = performance.now();
+      var duration = 2600;
+      function frame(now){
+        var t = Math.min(1, (now-start)/duration);
+        var ease = t<0.5 ? (2*t*t) : (1 - Math.pow(-2*t+2,2)/2);
+        var shockR = 200 + ease * 18000; // meters
+        var fireR  = 180 + Math.max(0,(0.6 - t))*2200;
+        var glowR  = 400 + ease * 8000;
+        shock.setRadius(shockR); shock.setStyle({opacity: 1 - t});
+        fire.setRadius(fireR); fire.setStyle({fillOpacity: Math.max(0, 0.6 - t)});
+        glow.setRadius(glowR); glow.setStyle({fillOpacity: Math.max(0, 0.25 - t*0.25)});
+        ripples.forEach(function(r,i){
+          var dt = Math.max(0, (now-start - (400*i))/duration);
+          var tt = Math.min(1, dt);
+          r.setRadius(300 + tt*12000);
+          r.setStyle({opacity: Math.max(0, 0.9 - tt)});
+        });
+        if(t < 1) requestAnimationFrame(frame); else {
+          map.removeLayer(shock); map.removeLayer(fire); map.removeLayer(glow);
+          ripples.forEach(function(r){ map.removeLayer(r); });
+          focusKapistec();
+        }
+      }
+      requestAnimationFrame(frame);
+    }
+
+    function focusKapistec(){
+      // Kapishtec approximate location in Skopje
+      var kap = L.latLng(41.9999, 21.4099);
+      map.flyTo(kap, 15, { duration: 2.8, easeLinearity: 0.25 });
+      setTimeout(function(){
+        var icon = L.divIcon({
+          className: 'kapistec-label',
+          html: '<div class="neon-title">КАПИШТЕЦ</div>',
+          iconSize: [0,0], iconAnchor: [0,0]
+        });
+        L.marker(kap, { icon: icon, pane:'fx', interactive:false }).addTo(map);
+      }, 1500);
+    }
+  }
+
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+</script>
+</body>
+</html>
+
+

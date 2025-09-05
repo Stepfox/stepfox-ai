@@ -39,6 +39,7 @@ if (file_exists($sfa_updater)) {
 // Autoload/includes
 require_once STEPFOX_AI_PLUGIN_DIR . 'includes/class-stepfox-ai.php';
 require_once STEPFOX_AI_PLUGIN_DIR . 'blocks/ai-console-runner/index.php';
+require_once STEPFOX_AI_PLUGIN_DIR . 'blocks/three-js/three-js.php';
 
 // Initialize
 function stepfox_ai_init_plugin() {
@@ -56,5 +57,4 @@ add_filter('plugin_action_links_' . plugin_basename(__FILE__), function($links){
     }
     return $links;
 });
-
 
